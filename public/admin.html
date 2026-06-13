@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAPS — Administrador</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Chart.js for Analytics -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <!-- Header Navigation -->
+  <header>
+    <div class="container nav-container">
+      <a href="/" class="logo brand-logo">
+        <span class="logo-title">BRVN</span>
+        <span class="logo-sub">CALZADO</span>
+      </a>
+      <div class="announcement-banner">
+        <span id="announcement-text">🎁 ¡DESCUENTO EN TU PRIMERA COMPRA! Código: MIPRIMERCOMPRA</span>
+      </div>
+      <div class="nav-icons" id="logout-container" style="display: none;">
+        <button onclick="logoutAdmin()" title="Cerrar Sesión" style="color: #ff3b30; font-size: 14px; font-weight: 600;">
+          <i class="fa-solid fa-right-from-bracket"></i> Salir
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    
+    <!-- 1. LOGIN CONTAINER -->
+    <div id="login-container" style="max-width: 400px; margin: 80px auto; border: 1px solid var(--border-color); padding: 40px 32px; border-radius: 8px; background-color: #fff;">
+      <h2 style="font-size: 24px; font-weight: 600; text-align: center; margin-bottom: 24px;">Iniciar Sesión</h2>
+      <form id="login-form" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="form-group">
+          <label for="admin-user">Usuario de Acceso</label>
+          <input type="text" id="admin-user" required placeholder="admin">
+        </div>
+        <div class="form-group">
+          <label for="admin-pass">Contraseña</label>
+          <input type="password" id="admin-pass" required placeholder="••••••••">
+        </div>
+        <button type="submit" class="buy-button" style="margin-top: 8px;">Entrar</button>
+      </form>
+    </div>
+
+    <!-- 2. ADMIN CONSOLE CONTAINER (Hidden by default) -->
+    <div id="console-container" style="display: none;" class="admin-layout">
+      
+      <!-- Tabs header -->
+      <div class="admin-tabs">
+        <button class="admin-tab active" onclick="switchTab('dashboard-section', this)">Dashboard</button>
+        <button class="admin-tab" onclick="switchTab('orders-section', this)">Pedidos</button>
+        <button class="admin-tab" id="tracking-tab-btn" onclick="switchTab('tracking-section', this)">Seguimiento</button>
+        <button class="admin-tab" onclick="switchTab('reports-section', this)">📊 Reportes de Venta</button>
+        <button class="admin-tab" onclick="switchTab('abandoned-section', this)">Carritos Abandonados</button>
+        <button class="admin-tab" onclick="switchTab('scraper-section', this)">Sincronizar Stock</button>
+      </div>
+
+      <!-- SECTION: DASHBOARD (Analytics) -->
+      <section id="dashboard-section" class="admin-section active">
+        <!-- Analytics Cards -->
+        <div class="analytics-grid">
+          <div class="analytics-card">
+            <div class="card-title">Ventas Totales</div>
+            <div class="card-value" id="metrics-revenue">$0 MXN</div>
+          </div>
+          <div class="analytics-card">
+            <div class="card-title">Pedidos Pagados</div>
+            <div class="card-value" id="metrics-sales">0</div>
+          </div>
+          <div class="analytics-card">
+            <div class="card-title">Ticket Promedio</div>
+            <div class="card-value" id="metrics-average">$0 MXN</div>
+          </div>
+          <div class="analytics-card">
+            <div class="card-title">Tasa de Conversión</div>
+            <div class="card-value" id="metrics-conversion">0%</div>
+          </div>
+        </div>
+
+        <!-- Charts Container -->
+        <div class="charts-grid">
+          <div class="chart-card">
+            <h3>Pedidos por Horario de Compra</h3>
+            <div style="position: relative; height:250px; width:100%;">
+              <canvas id="hoursChart"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <h3>Ventas por Categoría de Género</h3>
+            <div style="position: relative; height:250px; width:100%;">
+              <canvas id="genderChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Download Section -->
+        <div style="display: flex; gap: 16px; margin-bottom: 40px; justify-content: flex-end;">
+          <button onclick="downloadReport()" class="buy-button" style="width: auto; padding: 12px 24px;">
+            <i class="fa-solid fa-file-csv"></i> Descargar Reporte de Ventas (CSV)
+          </button>
+        </div>
+      </section>
+
+      <!-- SECTION: ORDERS LIST -->
+      <section id="orders-section" class="admin-section">
+        <h3 style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">Gestión de Pedidos</h3>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Folio</th>
+                <th>Cliente</th>
+                <th>Contacto</th>
+                <th>Detalles de Productos</th>
+                <th>Monto Total</th>
+                <th>Estatus</th>
+                <th>Acción / Enlace Dropshipping</th>
+              </tr>
+            </thead>
+            <tbody id="orders-table-body">
+              <!-- Mapped from JS -->
+              <tr>
+                <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 32px;">Cargando pedidos...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- SECTION: TRACKING MANAGER -->
+      <section id="tracking-section" class="admin-section">
+        <h3 style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">Seguimiento de Envíos</h3>
+        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; line-height: 1.5;">
+          Administra el estado de entrega de los pedidos. Puedes actualizar la paquetería, el número de guía y el estado de seguimiento que verá el cliente.
+        </p>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Folio</th>
+                <th>Cliente</th>
+                <th>Paquetería</th>
+                <th>Número de Guía</th>
+                <th>Estado de Seguimiento</th>
+                <th style="text-align: center;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tracking-table-body">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 32px;">Cargando información de seguimiento...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- SECTION: ABANDONED CARTS -->
+      <section id="abandoned-section" class="admin-section">
+        <h3 style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">Sesiones de Carritos Abandonados</h3>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Referencia</th>
+                <th>Cliente</th>
+                <th>Contacto</th>
+                <th>Productos en Carrito</th>
+                <th>Monto Estimado</th>
+                <th>Fecha de Abandono</th>
+              </tr>
+            </thead>
+            <tbody id="abandoned-table-body">
+              <!-- Mapped from JS -->
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 32px;">Cargando carritos abandonados...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- SECTION: SCRAPER MANAGER -->
+      <section id="scraper-section" class="admin-section" style="max-width: 800px;">
+        <h3 style="font-size: 20px; font-weight: 600; margin-bottom: 12px;">Sincronizador de Catálogo (Price Shoes)</h3>
+        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; line-height: 1.5;">
+          Ingresa la URL de búsqueda/catálogo de Price Shoes para descargar calzados y actualizar tallas o inventarios disponibles.
+        </p>
+        
+        <form id="scraper-form" style="display: flex; flex-direction: column; gap: 16px; max-width: 600px;">
+          <div class="form-group">
+            <label for="scraper-url">URL de búsqueda Price Shoes</label>
+            <input type="url" id="scraper-url" required placeholder="https://www.priceshoes.com/buscar?division=CALZADO&subcategory=BOTA...">
+          </div>
+          
+          <div class="form-group" style="width: 180px;">
+            <label for="scraper-products">Número de Productos</label>
+            <input type="number" id="scraper-products" min="1" value="30">
+          </div>
+          
+          <div class="form-group">
+            <label for="scraper-category">Categoría de Catálogo</label>
+            <input type="text" id="scraper-category" list="existing-categories" placeholder="Ej. Botas, Tenis, Sandalias" value="General">
+            <datalist id="existing-categories"></datalist>
+          </div>
+          
+          <button type="submit" class="buy-button" style="margin-top: 8px;">
+            <i class="fa-solid fa-arrows-rotate"></i> Iniciar Descarga de Catálogo
+          </button>
+        </form>
+
+        <div id="scraper-status-box" class="tracking-info-box" style="display: none; margin-top: 24px; border-color: #ff9500; max-width: 600px;">
+          <h4 style="font-weight: 600; color: #ff9500;"><i class="fa-solid fa-spinner fa-spin"></i> Sincronización en curso</h4>
+          <p style="font-size: 13px; margin-top: 6px; color: var(--text-secondary); line-height: 1.4;">
+            El scraper se está ejecutando en segundo plano en el servidor. Este proceso puede tardar unos minutos dependiendo de la cantidad de productos seleccionados. Puedes seguir usando el panel de administrador normalmente.
+          </p>
+        </div>
+
+        <div style="margin-top: 40px; border-top: 1px solid var(--border-color); padding-top: 24px;">
+          <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">Fuentes de Catálogo Activas (Sincronización Automática Cada 1 Hora)</h4>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>URL de Búsqueda</th>
+                  <th style="width: 150px;">Categoría</th>
+                  <th style="width: 80px;">Límite</th>
+                  <th style="width: 120px; text-align: center;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="catalog-sources-table-body">
+                <tr>
+                  <td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 16px;">
+                    Cargando fuentes de sincronización...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="margin-top: 40px; border-top: 1px solid var(--border-color); padding-top: 24px;">
+          <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px;">Categorías Activas</h4>
+          <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px; line-height: 1.5;">
+            Listado de categorías con productos en el sistema. Puedes eliminar una categoría para purgar permanentemente todos sus productos y fuentes de catálogo asociados.
+          </p>
+          <div class="table-container" style="max-width: 500px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Categoría</th>
+                  <th style="width: 110px; text-align: center;">Productos</th>
+                  <th style="width: 120px; text-align: center;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="categories-table-body">
+                <tr>
+                  <td colspan="2" style="text-align: center; color: var(--text-secondary); padding: 16px;">
+                    Cargando categorías...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- SECTION: SALES REPORTS -->
+      <section id="reports-section" class="admin-section">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px;">
+          <h3 style="font-size: 20px; font-weight: 600; margin: 0;">Reportes de Venta</h3>
+          <button onclick="downloadDetailedCSV()" class="buy-button" style="width: auto; padding: 10px 20px; font-size: 13px;">
+            <i class="fa-solid fa-file-csv"></i> Exportar CSV Detallado
+          </button>
+        </div>
+
+        <!-- Financial Summary Cards -->
+        <div class="analytics-grid" id="report-summary-cards" style="margin-bottom: 28px;">
+          <div class="analytics-card" style="border-left: 4px solid #34c759;">
+            <div class="card-title">Ingresos Totales</div>
+            <div class="card-value" id="rpt-revenue" style="color: #34c759;">$0 MXN</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Cobrado al cliente</div>
+          </div>
+          <div class="analytics-card" style="border-left: 4px solid #ff9500;">
+            <div class="card-title">Costo de Inventario</div>
+            <div class="card-value" id="rpt-cost" style="color: #ff9500;">$0 MXN</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Precio proveedor estimado</div>
+          </div>
+          <div class="analytics-card" style="border-left: 4px solid #007aff;">
+            <div class="card-title">Ganancia Neta</div>
+            <div class="card-value" id="rpt-profit" style="color: #007aff;">$0 MXN</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Ingresos − Costo</div>
+          </div>
+          <div class="analytics-card" style="border-left: 4px solid #1d1d1f;">
+            <div class="card-title">Margen Promedio</div>
+            <div class="card-value" id="rpt-margin">0%</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Ganancia / Ingreso</div>
+          </div>
+        </div>
+
+        <!-- Orders Detail Table -->
+        <div class="table-container">
+          <table id="reports-table">
+            <thead>
+              <tr>
+                <th>Folio</th>
+                <th>Fecha</th>
+                <th>Cliente</th>
+                <th>Productos</th>
+                <th style="text-align:right;">Ingreso</th>
+                <th style="text-align:right;">Costo Proveedor</th>
+                <th style="text-align:right;">Ganancia</th>
+                <th style="text-align:center;">Margen</th>
+                <th style="text-align:center;">Estatus</th>
+              </tr>
+            </thead>
+            <tbody id="reports-table-body">
+              <tr>
+                <td colspan="9" style="text-align: center; color: var(--text-secondary); padding: 32px;">Cargando reporte...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-content" style="justify-content: center;">
+      <p>&copy; 2026 Distributed by BRVN Store. Todos los derechos reservados. Panel de Control.</p>
+    </div>
+  </footer>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>

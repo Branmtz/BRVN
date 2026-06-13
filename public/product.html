@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BRVN — Producto</title>
+  <link rel="stylesheet" href="/css/styles.css?v=1.6">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <!-- Header Navigation -->
+  <header>
+    <div class="container nav-container">
+      <a href="/" class="logo brand-logo">
+        <span class="logo-title">BRVN</span>
+        <span class="logo-sub">CALZADO</span>
+      </a>
+      <div class="announcement-banner">
+        <span id="announcement-text">🎁 ¡Regalo en tu Primera Compra, ¡Regístrate ahora! Código: PAPSGIFT</span>
+      </div>
+      <div class="nav-icons">
+        <a href="javascript:void(0)" onclick="switchTab('menu')" title="Mi Cuenta"><i class="fa-regular fa-user"></i></a>
+        <a href="/cart.html" class="cart-icon" title="Carrito">
+          <i class="fa-solid fa-bag-shopping"></i>
+          <span id="cart-count">0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Product Detail Section -->
+  <main class="container">
+    <div class="product-detail-container" id="detail-page-content">
+      
+      <!-- Left Column: Image Gallery -->
+      <div class="gallery-container">
+        <div class="main-image-view" id="main-image-view">
+          <div style="color: var(--text-secondary); text-align: center;">
+            <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 8px;"></i>
+            <p>Cargando galería...</p>
+          </div>
+        </div>
+        <div class="thumbnails-grid" id="thumbnails-grid">
+          <!-- Populated from JS -->
+        </div>
+      </div>
+
+      <!-- Right Column: Product Info & Actions -->
+      <div class="detail-info">
+        <div>
+          <span class="detail-brand" id="detail-brand">MARCA</span>
+          <h1 class="detail-title" id="detail-title">Nombre del Calzado</h1>
+        </div>
+        <div class="detail-price" id="detail-price">$0 MXN</div>
+        
+        <div class="detail-divider"></div>
+        
+        <!-- Sizes Section -->
+        <div>
+          <h3 class="detail-section-title">Seleccionar Talla (MX)</h3>
+          <div class="size-selector" id="size-selector">
+            <!-- Populated from JS -->
+          </div>
+        </div>
+        
+        <!-- Action Button -->
+        <button class="buy-button" id="buy-btn" onclick="addToCart()">
+          <i class="fa-solid fa-bag-shopping"></i> Añadir al Carrito
+        </button>
+        
+        <div class="detail-divider"></div>
+        
+        <!-- Description Section -->
+        <div>
+          <h3 class="detail-section-title">Detalles del Calzado</h3>
+          <div class="detail-desc" id="detail-desc">
+            <!-- Populated from JS -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-content">
+      <div>
+        <p>&copy; 2026 Distributed by BRVN Store. Todos los derechos reservados.</p>
+      </div>
+      <div class="footer-links">
+        <a href="/track.html">Rastrear Pedido</a>
+        <a href="/admin.html">Administrador</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Mobile Bottom Navigation Bar -->
+  <nav class="bottom-nav">
+    <a class="bottom-nav-item" onclick="switchTab('home')" id="bottom-nav-home">
+      <i class="fa-solid fa-house"></i>
+      <span>Inicio</span>
+    </a>
+    <a class="bottom-nav-item" onclick="switchTab('categories')" id="bottom-nav-categories">
+      <i class="fa-solid fa-layer-group"></i>
+      <span>Categorías</span>
+    </a>
+    <a href="/cart.html" class="bottom-nav-item" id="bottom-nav-cart">
+      <div class="cart-icon-wrapper">
+        <i class="fa-solid fa-bag-shopping"></i>
+        <span class="cart-badge" id="mobile-cart-badge">0</span>
+      </div>
+      <span>Carrito</span>
+    </a>
+    <a class="bottom-nav-item" onclick="switchTab('trends')" id="bottom-nav-trends">
+      <i class="fa-solid fa-fire"></i>
+      <span>Trends</span>
+    </a>
+    <a class="bottom-nav-item" onclick="switchTab('menu')" id="bottom-nav-menu">
+      <i class="fa-solid fa-bars"></i>
+      <span>Menú</span>
+    </a>
+  </nav>
+
+  <script src="/js/app.js?v=1.5"></script>
+</body>
+</html>

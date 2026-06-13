@@ -1,0 +1,1863 @@
+const express = require('express');
+const path = require('path');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const { dbQuery } = require('./database');
+const { runScraper, verifyLiveStock } = require('./scraper');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'paps_default_jwt_secret_key_2026';
+
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Logistics / Shipping Router
+app.use(require('./shipping'));
+
+// Simple Rate Limiting for Login & Checkout
+const rateLimitMap = new Map();
+function rateLimiter(limit, windowMs) {
+  return (req, res, next) => {
+    const ip = req.ip;
+    const now = Date.now();
+    
+    if (!rateLimitMap.has(ip)) {
+      rateLimitMap.set(ip, []);
+    }
+    
+    const requests = rateLimitMap.get(ip).filter(time => now - time < windowMs);
+    requests.push(now);
+    rateLimitMap.set(ip, requests);
+    
+    if (requests.length > limit) {
+      return res.status(429).json({ error: 'Demasiadas peticiones. Por favor, intente más tarde.' });
+    }
+    next();
+  };
+}
+
+// Helper: Calculate Dynamic Pricing
+// Si el precio del proveedor es 0, el precio de venta es 0
+// Día  (5:00 – 23:59): precio proveedor + $500
+// Noche (0:00 –  4:59): precio proveedor + $300
+// El costo de envío se cotiza por separado en checkout (Skydropx)
+function calculatePrice(supplierPrice) {
+  if (supplierPrice === 0) return 0;
+  const hour = new Date().getHours(); // 0 – 23
+  const isNight = hour >= 0 && hour < 5;
+  const surcharge = isNight ? 300 : 500;
+  return supplierPrice + surcharge;
+}
+
+// Helper: Send Twilio WhatsApp Message
+async function sendWhatsAppAlert(orderId, customerName, total, items) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886';
+  const to = `whatsapp:${process.env.WHATSAPP_TO || '+525545598011'}`;
+  
+  if (!accountSid || !authToken || accountSid.startsWith('ACxxx')) {
+    console.log('[WhatsApp Alert Mocked] Twilio credentials not fully configured.');
+    console.log(`Alert Target: ${to}`);
+    console.log(`Message Body: 🛍️ ¡Nuevo pedido confirmado PAPS! Folio: ${orderId}. Cliente: ${customerName}. Total: $${total} MXN. Productos: ${items.map(i => `${i.title} (SKU: ${i.sku}, Talla: ${i.size}, Color: ${i.color})`).join(', ')}.`);
+    return;
+  }
+  
+  const itemsText = items.map(i => `• ${i.title}\n  SKU: ${i.sku} | Talla: ${i.size} | Color: ${i.color}`).join('\n');
+  const body = `🛍️ *¡Nueva venta en PAPS!*\n\n*Folio:* ${orderId}\n*Cliente:* ${customerName}\n*Total:* $${total} MXN\n\n*Productos del Pedido:*\n${itemsText}`;
+  
+  try {
+    const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+    const params = new URLSearchParams();
+    params.append('From', from);
+    params.append('To', to);
+    params.append('Body', body);
+    
+    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: params
+    });
+    
+    const result = await response.json();
+    if (response.ok) {
+      console.log('WhatsApp alert sent successfully via Twilio SID:', result.sid);
+    } else {
+      console.error('Error response from Twilio API:', result);
+    }
+  } catch (err) {
+    console.error('Failed to send Twilio WhatsApp notification:', err.message);
+  }
+}
+
+// Helper: Handle Order Payment Success (Decrements PAPS stock and triggers WhatsApp Alert)
+async function handleOrderPaymentSuccess(orderId, paymentId) {
+  try {
+    const order = await dbQuery.get("SELECT * FROM orders WHERE id = ?", [orderId]);
+    if (!order) return;
+    
+    if (order.status === 'pending') {
+      // 1. Update order status to paid and tracking_status to compra_realizada
+      await dbQuery.run("UPDATE orders SET status = 'paid', mp_payment_id = ?, tracking_status = 'compra_realizada' WHERE id = ?", [paymentId, orderId]);
+      console.log(`[Payment Success] Order ${orderId} successfully marked as paid. PaymentID: ${paymentId}`);
+      
+      // 2. Decrement stock for PAPS products
+      const items = JSON.parse(order.items || '[]');
+      for (const item of items) {
+        const product = await dbQuery.get("SELECT * FROM products WHERE id = ?", [item.id]);
+        if (product && product.origin === 'PAPS') {
+          const newStock = Math.max(0, product.stock - item.qty);
+          await dbQuery.run("UPDATE products SET stock = ? WHERE id = ?", [newStock, product.id]);
+          console.log(`[Stock Decrement] Product ${product.title} (${product.id}) stock updated from ${product.stock} to ${newStock}`);
+          
+          if (newStock === 0) {
+            // Mark product as inactive if it runs out of stock completely
+            await dbQuery.run("UPDATE products SET status = 'inactive' WHERE id = ?", [product.id]);
+            console.log(`[Stock Alert] Product ${product.title} (${product.id}) is now INACTIVE (out of stock).`);
+          }
+        }
+      }
+      
+      // 3. Send WhatsApp Alert
+      await sendWhatsAppAlert(orderId, order.customer_name, order.total, items);
+    }
+  } catch (err) {
+    console.error(`Error processing payment success for order ${orderId}:`, err.message);
+  }
+}
+
+// JWT Authenticator Middleware
+function authenticateAdmin(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  
+  if (!token) return res.status(401).json({ error: 'Acceso no autorizado.' });
+  
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Sesión inválida o expirada.' });
+    req.admin = user;
+    next();
+  });
+}
+
+const CUSTOMER_JWT_SECRET = process.env.CUSTOMER_JWT_SECRET || 'paps_customer_jwt_secret_key_2026';
+
+function authenticateCustomer(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  
+  if (!token) return res.status(401).json({ error: 'Inicia sesión para continuar.' });
+  
+  jwt.verify(token, CUSTOMER_JWT_SECRET, (err, customer) => {
+    if (err) return res.status(403).json({ error: 'Sesión expirada. Inicia sesión de nuevo.' });
+    req.customer = customer;
+    next();
+  });
+}
+
+function optionalAuthenticateCustomer(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (token) {
+    jwt.verify(token, CUSTOMER_JWT_SECRET, (err, customer) => {
+      if (!err) req.customer = customer;
+      next();
+    });
+  } else {
+    next();
+  }
+}
+
+// Shared Helper: Fetch shipping rates from Skydropx
+async function getShippingRates(zip_to, items_count = 1) {
+  const apiKey = process.env.SKYDROPX_API_KEY;
+  const weight = 1;
+  
+  if (!apiKey || apiKey === 'your_skydropx_api_key_here') {
+    return {
+      fallback: true,
+      rates: [
+        { carrier: 'Estafeta', service: 'Estándar (3-5 días)', total: 149 + (items_count - 1) * 30 },
+        { carrier: 'FedEx',    service: 'Express (1-2 días)',   total: 199 + (items_count - 1) * 40 },
+      ]
+    };
+  }
+
+  const payload = {
+    zip_from: process.env.ORIGIN_ZIP || '06600',
+    zip_to,
+    parcel: {
+      mass_unit: 'KG',
+      weight: weight * (items_count || 1),
+      distance_unit: 'CM',
+      height: 15,
+      width: 25,
+      length: 30
+    }
+  };
+
+  const response = await fetch('https://api.skydropx.com/v1/quotations', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Token ${apiKey}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error('[Skydropx] Error:', response.status, errText);
+    throw new Error('No se pudo obtener la cotización de envío de Skydropx.');
+  }
+
+  const data = await response.json();
+  const rates = (data.data || []).map(r => ({
+    carrier:  r.attributes?.provider  || r.provider,
+    service:  r.attributes?.service_level_name || r.service_level_name,
+    days:     r.attributes?.days        || r.days,
+    total:    Math.round(parseFloat(r.attributes?.total_pricing || r.total_pricing || 0))
+  })).filter(r => r.total > 0).sort((a, b) => a.total - b.total);
+
+  return { fallback: false, rates };
+}
+
+// POST /api/shipping/quote
+app.post('/api/shipping/quote', async (req, res) => {
+  const { zip_to, items_count = 1 } = req.body;
+  
+  if (!zip_to || !/^\d{5}$/.test(zip_to)) {
+    return res.status(400).json({ error: 'Código postal inválido. Debe ser de 5 dígitos.' });
+  }
+
+  try {
+    const result = await getShippingRates(zip_to, items_count);
+    res.json(result);
+  } catch (err) {
+    console.error('[Shipping Quote] Error:', err);
+    res.status(500).json({ error: 'Error al cotizar el envío con Skydropx.' });
+  }
+});
+
+/* --- PUBLIC APIS --- */
+
+// GET Catalog of active products
+app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
+  try {
+    const products = await dbQuery.all("SELECT * FROM products WHERE status = 'active'");
+    
+    // Fetch average ratings
+    const ratingsData = await dbQuery.all("SELECT product_id, AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings GROUP BY product_id");
+    const ratingsMap = {};
+    ratingsData.forEach(r => {
+      ratingsMap[r.product_id] = {
+        average: r.avgRating ? parseFloat(r.avgRating.toFixed(1)) : 0,
+        count: r.countRating || 0
+      };
+    });
+
+    // Fetch favorites if customer is logged in
+    const customerId = req.customer ? req.customer.id : null;
+    const favoriteIds = new Set();
+    if (customerId) {
+      const favs = await dbQuery.all("SELECT product_id FROM favorites WHERE customer_id = ?", [customerId]);
+      favs.forEach(f => favoriteIds.add(f.product_id));
+    }
+
+    // Map dynamic customer price in real time
+    const mappedProducts = products.map(p => {
+      const currentPrice = calculatePrice(p.supplier_price);
+      return {
+        ...p,
+        price: currentPrice,
+        images: JSON.parse(p.images || '[]'),
+        sizes: JSON.parse(p.sizes || '[]'),
+        isFavorite: customerId ? favoriteIds.has(p.id) : false,
+        rating: ratingsMap[p.id] || { average: 0, count: 0 }
+      };
+    });
+    res.json(mappedProducts);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener el catálogo de productos.' });
+  }
+});
+
+// GET Categories of active products
+app.get('/api/categories', async (req, res) => {
+  const { gender } = req.query;
+  try {
+    let rows;
+    if (gender) {
+      rows = await dbQuery.all("SELECT DISTINCT category FROM products WHERE status = 'active' AND category IS NOT NULL AND gender = ?", [gender]);
+    } else {
+      rows = await dbQuery.all("SELECT DISTINCT category FROM products WHERE status = 'active' AND category IS NOT NULL");
+    }
+    const categories = rows.map(r => r.category);
+    res.json(categories);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener las categorías.' });
+  }
+});
+
+// GET Categories with product count (for admin panel)
+app.get('/api/categories/detailed', authenticateAdmin, async (req, res) => {
+  try {
+    const rows = await dbQuery.all(
+      "SELECT category as name, COUNT(*) as count FROM products WHERE status = 'active' AND category IS NOT NULL GROUP BY category ORDER BY category ASC"
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener las categorías detalladas.' });
+  }
+});
+
+// GET Brands of active products
+app.get('/api/brands', async (req, res) => {
+  try {
+    const rows = await dbQuery.all("SELECT DISTINCT brand FROM products WHERE status = 'active' AND brand IS NOT NULL ORDER BY brand ASC");
+    const brands = rows.map(r => r.brand);
+    res.json(brands);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener las marcas.' });
+  }
+});
+
+// GET Single product detail
+app.get('/api/products/:id', optionalAuthenticateCustomer, async (req, res) => {
+  try {
+    const product = await dbQuery.get("SELECT * FROM products WHERE id = ?", [req.params.id]);
+    if (!product) return res.status(404).json({ error: 'Producto no encontrado.' });
+    
+    // Fetch average rating
+    const ratingResult = await dbQuery.get("SELECT AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings WHERE product_id = ?", [product.id]);
+    
+    // Fetch favorite status
+    const customerId = req.customer ? req.customer.id : null;
+    let isFavorite = false;
+    if (customerId) {
+      const fav = await dbQuery.get("SELECT 1 FROM favorites WHERE customer_id = ? AND product_id = ?", [customerId, product.id]);
+      isFavorite = !!fav;
+    }
+    
+    res.json({
+      ...product,
+      price: calculatePrice(product.supplier_price),
+      images: JSON.parse(product.images || '[]'),
+      sizes: JSON.parse(product.sizes || '[]'),
+      isFavorite,
+      rating: {
+        average: ratingResult.avgRating ? parseFloat(ratingResult.avgRating.toFixed(1)) : 0,
+        count: ratingResult.countRating || 0
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener los detalles del producto.' });
+  }
+});
+
+// POST Checkout and Payment preference generation
+app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
+  const { customerName, customerEmail, customerPhone, shippingAddress, items, shippingCarrier } = req.body;
+  
+  if (!customerName || !customerEmail || !customerPhone || !shippingAddress || !items || items.length === 0) {
+    return res.status(400).json({ error: 'Todos los campos son obligatorios.' });
+  }
+  
+  try {
+    // Attempt to parse customer JWT from Authorization header
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    let customerId = null;
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
+        customerId = decoded.id;
+      } catch (tokenErr) {
+        // invalid token, process as guest
+      }
+    }
+
+    // 1. Calculate secure total from DB prices (prevent client-side tampering)
+    let calculatedTotal = 0;
+    const finalItems = [];
+    
+    for (const item of items) {
+      const product = await dbQuery.get("SELECT * FROM products WHERE id = ?", [item.id]);
+      if (!product) {
+        return res.status(400).json({ error: `El producto ${item.title} no está disponible.` });
+      }
+      
+      const sizesArray = JSON.parse(product.sizes || '[]');
+      if (!sizesArray.includes(item.size.toString())) {
+        return res.status(400).json({ error: `La talla ${item.size} no está disponible para ${product.title}.` });
+      }
+      
+      // Check stock for local PAPS products
+      if (product.origin === 'PAPS' && product.stock < item.qty) {
+        return res.status(400).json({ 
+          error: `Lo sentimos, el producto "${product.title}" no tiene suficiente stock disponible (Disponible: ${product.stock}).` 
+        });
+      }
+      
+      // Real-time stock verification for Price Shoes dropshipping products
+      if (product.origin === 'priceshoes' && product.original_url) {
+        const isStillInStock = await verifyLiveStock(product.original_url, item.size);
+        if (!isStillInStock) {
+          // If the size is out of stock on Price Shoes, remove it from our local database to keep it updated
+          const updatedSizes = sizesArray.filter(s => s.toString().trim() !== item.size.toString().trim());
+          await dbQuery.run("UPDATE products SET sizes = ? WHERE id = ?", [JSON.stringify(updatedSizes), product.id]);
+          
+          return res.status(400).json({ 
+            error: `Lo sentimos, el producto "${product.title}" se acaba de agotar en la talla ${item.size} en el almacén del proveedor. Tu saldo no ha sido cobrado.` 
+          });
+        }
+      }
+      
+      const securePrice = calculatePrice(product.supplier_price);
+      calculatedTotal += securePrice * item.qty;
+      
+      finalItems.push({
+        id: product.id,
+        sku: product.sku,
+        title: product.title,
+        size: item.size,
+        color: item.color || product.color,
+        price: securePrice,
+        qty: item.qty
+      });
+    }
+
+    // Secure Shipping Calculation
+    let selectedShippingCost = 150; // default/fallback flat shipping fee
+    let finalCarrierName = 'Envío Estándar';
+    
+    if (shippingCarrier) {
+      try {
+        const cpMatch = shippingAddress.match(/C\.P\.\s*(\d{5})/i) || shippingAddress.match(/\b\d{5}\b/);
+        const zip_to = cpMatch ? cpMatch[1] || cpMatch[0] : null;
+        
+        if (zip_to && /^\d{5}$/.test(zip_to)) {
+          const itemsCount = items.reduce((sum, item) => sum + parseInt(item.qty || 1), 0);
+          const quoteResult = await getShippingRates(zip_to, itemsCount);
+          
+          // Match the chosen carrier name from client to the live rates
+          const matchingRate = quoteResult.rates.find(r => {
+            const combinedName = `${r.carrier} - ${r.service}`.toLowerCase();
+            return combinedName.includes(shippingCarrier.toLowerCase()) || 
+                   shippingCarrier.toLowerCase().includes(r.carrier.toLowerCase());
+          });
+          
+          if (matchingRate) {
+            selectedShippingCost = matchingRate.total;
+            finalCarrierName = `${matchingRate.carrier} (${matchingRate.service})`;
+          } else {
+            if (quoteResult.rates && quoteResult.rates.length > 0) {
+              selectedShippingCost = quoteResult.rates[0].total;
+              finalCarrierName = `${quoteResult.rates[0].carrier} (${quoteResult.rates[0].service})`;
+            }
+          }
+        }
+      } catch (quoteErr) {
+        console.error('Error calculating shipping cost during checkout:', quoteErr);
+      }
+    }
+    
+    calculatedTotal += selectedShippingCost;
+    
+    // 2. Generate unique Folio
+    const lastOrder = await dbQuery.get("SELECT id FROM orders ORDER BY created_at DESC LIMIT 1");
+    let nextNum = 1001;
+    if (lastOrder && (lastOrder.id.startsWith('MARYLIN-') || lastOrder.id.startsWith('BRVN-') || lastOrder.id.startsWith('PAPS-'))) {
+      const lastNum = parseInt(lastOrder.id.split('-')[1]);
+      if (!isNaN(lastNum)) nextNum = lastNum + 1;
+    }
+    const orderFolio = `BRVN-${nextNum}`;
+    
+    // 3. Register Order in Pending state
+    await dbQuery.run(`
+      INSERT INTO orders (
+        id, customer_name, customer_email, customer_phone, shipping_address, items, total, status, customer_id, shipping_carrier
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `, [
+      orderFolio,
+      customerName,
+      customerEmail,
+      customerPhone,
+      shippingAddress,
+      JSON.stringify(finalItems),
+      calculatedTotal,
+      customerId,
+      finalCarrierName
+    ]);
+
+    // Bypassing payment preference creation for zero cost test checkout
+    if (calculatedTotal === 0) {
+      console.log(`[Zero Price Checkout] Generated link for folio: ${orderFolio}`);
+      return res.json({
+        folio: orderFolio,
+        checkoutUrl: `/simulated-payment.html?folio=${orderFolio}&total=0`
+      });
+    }
+    
+    // 4. Create Mercado Pago Preference
+    const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+    const isMock = !mpToken || mpToken.startsWith('TEST-xxx');
+    
+    if (isMock) {
+      // Return a simulated checkout link for local sandbox testing
+      console.log(`[Mercado Pago Preference Mocked] Generated link for folio: ${orderFolio}`);
+      return res.json({
+        folio: orderFolio,
+        checkoutUrl: `/simulated-payment.html?folio=${orderFolio}&total=${calculatedTotal}`
+      });
+    }
+    
+    // Call Mercado Pago API
+    const host = req.get('host');
+    let baseUrl = `${req.protocol}://${host}`;
+    
+    // Mercado Pago does not allow localhost or local IPs in back_urls.
+    // If running locally, we check if PUBLIC_URL is defined in .env, otherwise fallback to a dummy public URL.
+    if (host.includes('localhost') || host.includes('127.0.0.1') || host.startsWith('192.168.')) {
+      if (process.env.PUBLIC_URL) {
+        baseUrl = process.env.PUBLIC_URL;
+      } else {
+        console.warn('[Mercado Pago] Local host detected. Mercado Pago does not allow localhost in back_urls. Falling back to a dummy public URL (https://brvn-store.com). To test redirects locally, please set PUBLIC_URL in your .env (e.g. using ngrok).');
+        baseUrl = 'https://brvn-store.com';
+      }
+    }
+
+    const preferenceData = {
+      items: finalItems.map(i => ({
+        id: i.id,
+        title: `${i.title} (Talla: ${i.size}, Color: ${i.color})`,
+        quantity: i.qty,
+        unit_price: i.price,
+        currency_id: 'MXN'
+      })),
+      payer: {
+        name: customerName,
+        email: customerEmail,
+        phone: {
+          number: customerPhone.replace(/\D/g, '')
+        }
+      },
+      back_urls: {
+        success: `${baseUrl}/checkout-result.html?status=success&folio=${orderFolio}`,
+        failure: `${baseUrl}/checkout-result.html?status=failure&folio=${orderFolio}`,
+        pending: `${baseUrl}/checkout-result.html?status=pending&folio=${orderFolio}`
+      },
+      auto_return: 'approved',
+      external_reference: orderFolio,
+      notification_url: `${baseUrl}/api/webhooks/mercadopago`
+    };
+    
+    const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${mpToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(preferenceData)
+    });
+    
+    const prefResult = await mpResponse.json();
+    if (mpResponse.ok && prefResult.init_point) {
+      // Save MP Preference ID in orders DB
+      await dbQuery.run("UPDATE orders SET mp_preference_id = ? WHERE id = ?", [prefResult.id, orderFolio]);
+      
+      res.json({
+        folio: orderFolio,
+        checkoutUrl: prefResult.init_point
+      });
+    } else {
+      console.error('Mercado Pago Error:', prefResult);
+      res.status(500).json({ error: 'Error al contactar con la pasarela de pagos.' });
+    }
+    
+  } catch (err) {
+    console.error('Checkout error:', err);
+    res.status(500).json({ error: 'Ocurrió un error al procesar la compra.' });
+  }
+});
+
+// POST Mercado Pago Webhook / Notification IPN
+app.post('/api/webhooks/mercadopago', async (req, res) => {
+  // Respond instantly to MP to acknowledge receipt
+  res.status(200).send('OK');
+  
+  const query = req.query || {};
+  const body = req.body || {};
+  
+  // Mercado Pago sends webhooks in req.body and IPNs in req.query
+  const topic = query.topic || query.type || body.type || body.action;
+  const resourceId = query.id || query['data.id'] || (body.data && body.data.id) || body.id;
+  
+  // Normalizing topic since MP action webhook can send "payment.created" or similar
+  const isPaymentEvent = topic === 'payment' || (topic && topic.startsWith('payment'));
+  
+  if (isPaymentEvent && resourceId) {
+    try {
+      const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+      if (!mpToken || mpToken.startsWith('TEST-xxx')) return;
+      
+      // Query payment details from Mercado Pago API
+      const mpPayResponse = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
+        headers: { 'Authorization': `Bearer ${mpToken}` }
+      });
+      
+      if (mpPayResponse.ok) {
+        const payment = await mpPayResponse.json();
+        const folio = payment.external_reference;
+        const status = payment.status;
+        
+        if (status === 'approved' && folio) {
+          await handleOrderPaymentSuccess(folio, resourceId.toString());
+        }
+      }
+    } catch (err) {
+      console.error('Webhook processing error:', err.message);
+    }
+  }
+});
+
+// POST Client Order Tracking
+app.post('/api/orders/track', async (req, res) => {
+  const { folio, contact } = req.body;
+  if (!folio || !contact) {
+    return res.status(400).json({ error: 'Folio y contacto son obligatorios.' });
+  }
+  
+  try {
+    const order = await dbQuery.get(`
+      SELECT * FROM orders 
+      WHERE id = ? AND (LOWER(customer_email) = ? OR customer_phone = ?)
+    `, [
+      folio.trim(),
+      contact.trim().toLowerCase(),
+      contact.trim()
+    ]);
+    
+    if (!order) {
+      return res.status(404).json({ error: 'No se encontró ningún pedido con esos datos de folio y contacto.' });
+    }
+    
+    res.json({
+      folio: order.id,
+      customerName: order.customer_name,
+      items: JSON.parse(order.items),
+      total: order.total,
+      status: order.status,
+      trackingStatus: order.tracking_status || 'compra_realizada',
+      trackingNumber: order.tracking_number,
+      shippingCarrier: order.shipping_carrier,
+      createdAt: order.created_at
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al consultar el rastreo de pedido.' });
+  }
+});
+
+// POST Simulated Payment Callback (for Mock Sandbox testing)
+app.post('/api/checkout/simulate-payment', async (req, res) => {
+  const { folio } = req.body;
+  try {
+    const order = await dbQuery.get("SELECT * FROM orders WHERE id = ?", [folio]);
+    if (order && order.status === 'pending') {
+      const paymentId = `SIM-PAY-${Date.now()}`;
+      await handleOrderPaymentSuccess(folio, paymentId);
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: 'El pedido no existe o ya está pagado.' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Error en la simulación de pago.' });
+  }
+});
+
+// POST Verify Mercado Pago Payment (fallback when redirecting back)
+app.post('/api/checkout/verify-payment', async (req, res) => {
+  const { folio, paymentId } = req.body;
+  if (!folio || !paymentId) {
+    return res.status(400).json({ error: 'Folio y paymentId son requeridos.' });
+  }
+
+  try {
+    const order = await dbQuery.get("SELECT * FROM orders WHERE id = ?", [folio]);
+    if (!order) {
+      return res.status(404).json({ error: 'Pedido no encontrado.' });
+    }
+
+    if (order.status !== 'pending') {
+      // Order is already paid or processed
+      return res.json({ success: true, status: order.status });
+    }
+
+    const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+    const isMock = !mpToken || mpToken.startsWith('TEST-xxx');
+
+    if (isMock) {
+      // In sandbox mock mode, if we get here we can approve it if requested
+      if (paymentId.startsWith('SIM-PAY-')) {
+        await handleOrderPaymentSuccess(folio, paymentId);
+        return res.json({ success: true, status: 'paid' });
+      }
+      return res.status(400).json({ error: 'Credenciales de prueba activas. Use el simulador.' });
+    }
+
+    // Call Mercado Pago API to verify payment status
+    const mpPayResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+      headers: { 'Authorization': `Bearer ${mpToken}` }
+    });
+
+    if (mpPayResponse.ok) {
+      const payment = await mpPayResponse.json();
+      const mpFolio = payment.external_reference;
+      const mpStatus = payment.status;
+
+      if (mpFolio === folio && mpStatus === 'approved') {
+        await handleOrderPaymentSuccess(folio, paymentId.toString());
+        return res.json({ success: true, status: 'paid' });
+      } else {
+        return res.status(400).json({ 
+          error: `El pago no está aprobado o no coincide con el folio. Estado MP: ${mpStatus}` 
+        });
+      }
+    } else {
+      const errData = await mpPayResponse.text();
+      console.error('Error verifying payment with Mercado Pago:', errData);
+      return res.status(500).json({ error: 'No se pudo verificar el pago con Mercado Pago.' });
+    }
+  } catch (err) {
+    console.error('Error in verify-payment:', err);
+    res.status(500).json({ error: 'Error interno al verificar el pago.' });
+  }
+});
+
+
+/* --- NODEMAILER & AUTH SIGNUP / VERIFICATION SYSTEM --- */
+
+const nodemailer = require('nodemailer');
+let mailTransporter;
+
+async function initNodemailer() {
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  
+  if (host && user && pass) {
+    mailTransporter = nodemailer.createTransport({
+      host: host,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: user,
+        pass: pass
+      }
+    });
+    console.log(`[Email] Nodemailer configured using SMTP: ${host}`);
+  } else {
+    console.log('[Email] No SMTP credentials in environment. Generating dynamic Ethereal test account...');
+    try {
+      const testAccount = await nodemailer.createTestAccount();
+      mailTransporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass
+        }
+      });
+      console.log('--------------------------------------------------');
+      console.log('📧 Dynamic Ethereal Email Account Generated!');
+      console.log(`SMTP Host: ${testAccount.smtp.host}`);
+      console.log(`SMTP Port: ${testAccount.smtp.port}`);
+      console.log(`User:      ${testAccount.user}`);
+      console.log(`Pass:      ${testAccount.pass}`);
+      console.log('--------------------------------------------------');
+    } catch (err) {
+      console.error('Failed to create Nodemailer test account:', err.message);
+    }
+  }
+}
+
+initNodemailer();
+
+function isValidCode(code) {
+  const digits = code.split('').map(Number);
+  let consecutiveCount = 1;
+  for (let i = 1; i < digits.length; i++) {
+    const diff = digits[i] - digits[i - 1];
+    if (diff === 1 || diff === -1) {
+      consecutiveCount++;
+      if (consecutiveCount > 2) return false;
+    } else {
+      consecutiveCount = 1;
+    }
+  }
+  return true;
+}
+
+function generateCode() {
+  let code;
+  do {
+    code = Math.floor(100000 + Math.random() * 900000).toString();
+  } while (!isValidCode(code));
+  return code;
+}
+
+// POST /api/auth/register
+app.post('/api/auth/register', async (req, res) => {
+  const { nombre, apellido_pat, apellido_mat, email, telefono, password } = req.body;
+  
+  if (!nombre || !apellido_pat || !apellido_mat || !email || !telefono || !password) {
+    return res.status(400).json({ error: 'Todos los campos son obligatorios.' });
+  }
+  
+  if (!/^\d{10}$/.test(telefono.trim())) {
+    return res.status(400).json({ error: 'El número de teléfono debe ser de 10 dígitos.' });
+  }
+  
+  // Password validation rules
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+  }
+  if (!/[A-Z]/.test(password)) {
+    return res.status(400).json({ error: 'La contraseña debe contener al menos una letra mayúscula.' });
+  }
+  if (!/[a-z]/.test(password)) {
+    return res.status(400).json({ error: 'La contraseña debe contener al menos una letra minúscula.' });
+  }
+  if (!/\d/.test(password)) {
+    return res.status(400).json({ error: 'La contraseña debe contener al menos un número.' });
+  }
+  if (!/[!@#$%^&*]/.test(password)) {
+    return res.status(400).json({ error: 'La contraseña debe contener al menos un símbolo especial (!@#$%^&*).' });
+  }
+  
+  try {
+    const existing = await dbQuery.get("SELECT id FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
+    if (existing) {
+      return res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
+    }
+    
+    const passwordHash = await bcrypt.hash(password, 12);
+    
+    const result = await dbQuery.run(`
+      INSERT INTO users (nombre, apellido_pat, apellido_mat, email, telefono, password, verified)
+      VALUES (?, ?, ?, ?, ?, ?, 0)
+    `, [nombre.trim(), apellido_pat.trim(), apellido_mat.trim(), email.trim().toLowerCase(), telefono.trim(), passwordHash]);
+    
+    const userId = result.lastID;
+    const code = generateCode();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    
+    await dbQuery.run(`
+      INSERT INTO verification_codes (code, user_id, expires_at, used, attempts)
+      VALUES (?, ?, ?, 0, 0)
+    `, [code, userId, expiresAt]);
+    
+    if (mailTransporter) {
+      const mailOptions = {
+        from: '"B R V N" <noreply@brvn-store.com>',
+        to: email.trim().toLowerCase(),
+        subject: 'Código de verificación - B R V N',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+            <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
+            <p style="color: #666; font-size: 16px; line-height: 1.5; text-align: center;">Gracias por registrarte. Para completar tu registro, por favor ingresa el siguiente código de verificación:</p>
+            <div style="background-color: #f9f9f9; padding: 15px; text-align: center; border-radius: 6px; margin: 25px 0;">
+              <span style="font-size: 32px; font-weight: bold; letter-spacing: 0.1em; color: #000;">${code}</span>
+            </div>
+            <p style="color: #ff3b30; font-size: 13px; font-weight: bold; text-align: center; margin-top: 15px;">Este código expira en 5 minutos.</p>
+          </div>
+        `
+      };
+      
+      const info = await mailTransporter.sendMail(mailOptions);
+      console.log(`[Email] Verification code sent to ${email}: ${info.messageId}`);
+      const previewUrl = nodemailer.getTestMessageUrl(info);
+      if (previewUrl) {
+        console.log(`[Email] Verification Code Preview URL: ${previewUrl}`);
+      }
+    } else {
+      console.warn(`[Email Warning] Transporter not ready. Generated verification code for ${email} is: ${code}`);
+    }
+    
+    res.json({ success: true, message: 'Usuario registrado. Por favor verifica tu correo.', email: email.trim().toLowerCase() });
+  } catch (err) {
+    console.error('Registration error:', err);
+    res.status(500).json({ error: 'Ocurrió un error al registrar la cuenta.' });
+  }
+});
+
+// POST /api/auth/verify-email
+app.post('/api/auth/verify-email', async (req, res) => {
+  const { email, code } = req.body;
+  if (!email || !code) {
+    return res.status(400).json({ error: 'El correo y el código son obligatorios.' });
+  }
+  
+  try {
+    const user = await dbQuery.get("SELECT * FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
+    if (!user) {
+      return res.status(404).json({ error: 'Usuario no encontrado.' });
+    }
+    
+    const lastCode = await dbQuery.get(`
+      SELECT * FROM verification_codes 
+      WHERE user_id = ? AND used = 0
+      ORDER BY created_at DESC LIMIT 1
+    `, [user.id]);
+    
+    if (!lastCode) {
+      return res.status(400).json({ error: 'Código incorrecto.' });
+    }
+    
+    if (lastCode.attempts >= 5) {
+      await dbQuery.run("UPDATE verification_codes SET used = 1 WHERE id = ?", [lastCode.id]);
+      return res.status(400).json({ error: 'Código incorrecto. Límite de intentos alcanzado.' });
+    }
+    
+    const now = new Date();
+    const expiresAt = new Date(lastCode.expires_at);
+    if (now > expiresAt) {
+      return res.status(400).json({ error: 'Código expirado, solicita uno nuevo.' });
+    }
+    
+    if (lastCode.code !== code.toString().trim()) {
+      const newAttempts = lastCode.attempts + 1;
+      if (newAttempts >= 5) {
+        await dbQuery.run("UPDATE verification_codes SET used = 1, attempts = ? WHERE id = ?", [newAttempts, lastCode.id]);
+        return res.status(400).json({ error: 'Código incorrecto. Límite de intentos alcanzado.' });
+      } else {
+        await dbQuery.run("UPDATE verification_codes SET attempts = ? WHERE id = ?", [newAttempts, lastCode.id]);
+        const remaining = 5 - newAttempts;
+        return res.status(400).json({ error: `Código incorrecto. Intentos restantes: ${remaining}` });
+      }
+    }
+    
+    // Success: Mark code as used and update user verified
+    await dbQuery.run("UPDATE verification_codes SET used = 1 WHERE id = ?", [lastCode.id]);
+    await dbQuery.run("UPDATE users SET verified = 1 WHERE id = ?", [user.id]);
+    
+    const fullName = `${user.nombre} ${user.apellido_pat} ${user.apellido_mat}`.trim();
+    const token = jwt.sign({ id: user.id, email: user.email, name: fullName }, CUSTOMER_JWT_SECRET, { expiresIn: '30d' });
+    
+    res.json({
+      success: true,
+      token,
+      customer: {
+        id: user.id,
+        name: fullName,
+        email: user.email,
+        phone: user.telefono
+      }
+    });
+  } catch (err) {
+    console.error('Verification error:', err);
+    res.status(500).json({ error: 'Error interno al verificar el código.' });
+  }
+});
+
+// POST /api/auth/resend-code
+app.post('/api/auth/resend-code', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'El correo electrónico es requerido.' });
+  }
+  
+  try {
+    const user = await dbQuery.get("SELECT * FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
+    if (!user) {
+      return res.status(404).json({ error: 'Usuario no encontrado.' });
+    }
+    
+    // Invalidate previous codes
+    await dbQuery.run("UPDATE verification_codes SET used = 1 WHERE user_id = ?", [user.id]);
+    
+    const code = generateCode();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    
+    await dbQuery.run(`
+      INSERT INTO verification_codes (code, user_id, expires_at, used, attempts)
+      VALUES (?, ?, ?, 0, 0)
+    `, [code, user.id, expiresAt]);
+    
+    if (mailTransporter) {
+      const mailOptions = {
+        from: '"B R V N" <noreply@brvn-store.com>',
+        to: email.trim().toLowerCase(),
+        subject: 'Nuevo código de verificación - B R V N',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+            <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
+            <p style="color: #666; font-size: 16px; line-height: 1.5; text-align: center;">Aquí está tu nuevo código de verificación:</p>
+            <div style="background-color: #f9f9f9; padding: 15px; text-align: center; border-radius: 6px; margin: 25px 0;">
+              <span style="font-size: 32px; font-weight: bold; letter-spacing: 0.1em; color: #000;">${code}</span>
+            </div>
+            <p style="color: #ff3b30; font-size: 13px; font-weight: bold; text-align: center; margin-top: 15px;">Este código expira en 5 minutos.</p>
+          </div>
+        `
+      };
+      
+      const info = await mailTransporter.sendMail(mailOptions);
+      console.log(`[Email] New code sent to ${email}: ${info.messageId}`);
+      const previewUrl = nodemailer.getTestMessageUrl(info);
+      if (previewUrl) {
+        console.log(`[Email] Resend Code Preview URL: ${previewUrl}`);
+      }
+    } else {
+      console.warn(`[Email Warning] Transporter not ready. New code for ${email} is: ${code}`);
+    }
+    
+    res.json({ success: true, message: 'Nuevo código enviado con éxito.' });
+  } catch (err) {
+    console.error('Resend error:', err);
+    res.status(500).json({ error: 'Error al reenviar el código.' });
+  }
+});
+
+// POST /api/auth/forgot-password
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'El correo electrónico es requerido.' });
+  }
+  
+  try {
+    const user = await dbQuery.get("SELECT * FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
+    
+    // Security best practice: Always respond with success
+    res.json({ success: true, message: 'Si el correo está registrado, recibirás un enlace de recuperación en unos momentos.' });
+    
+    if (user) {
+      const resetToken = jwt.sign({ resetUserId: user.id, email: user.email }, CUSTOMER_JWT_SECRET, { expiresIn: '15m' });
+      
+      if (mailTransporter) {
+        const mailOptions = {
+          from: '"B R V N" <noreply@brvn-store.com>',
+          to: email.trim().toLowerCase(),
+          subject: 'Restablecer contraseña - B R V N',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+              <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
+              <p style="color: #666; font-size: 16px; line-height: 1.5;">Recibimos una solicitud para restablecer tu contraseña. Haz clic en el siguiente enlace para crear una nueva contraseña:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="http://localhost:3000/reset-password.html?token=${resetToken}" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; display: inline-block;">Restablecer Contraseña</a>
+              </div>
+              <p style="color: #999; font-size: 12px; text-align: center; margin-top: 15px;">Este enlace es válido por 15 minutos.</p>
+            </div>
+          `
+        };
+        
+        const info = await mailTransporter.sendMail(mailOptions);
+        console.log(`[Email] Password reset sent to ${email}: ${info.messageId}`);
+        const previewUrl = nodemailer.getTestMessageUrl(info);
+        if (previewUrl) {
+          console.log(`[Email] Reset Link Preview URL: ${previewUrl}`);
+        }
+      } else {
+        console.warn(`[Email Warning] Transporter not ready. Reset link for ${email} is: http://localhost:3000/reset-password.html?token=${resetToken}`);
+      }
+    }
+  } catch (err) {
+    console.error('Forgot password error:', err);
+  }
+});
+
+// POST /api/auth/reset-password
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) {
+    return res.status(400).json({ error: 'El token y la contraseña son obligatorios.' });
+  }
+  
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres.' });
+  }
+  if (!/[A-Z]/.test(password)) {
+    return res.status(400).json({ error: 'La contraseña debe contener al menos una letra mayúscula.' });
+  }
+  if (!/[a-z]/.test(password)) {
+    return res.status(400).json({ error: 'La contraseña debe contener al menos una letra minúscula.' });
+  }
+  if (!/\d/.test(password)) {
+    return res.status(400).json({ error: 'La contraseña debe contener al menos un número.' });
+  }
+  if (!/[!@#$%^&*]/.test(password)) {
+    return res.status(400).json({ error: 'La contraseña debe contener al menos un símbolo especial (!@#$%^&*).' });
+  }
+  
+  try {
+    let decoded;
+    try {
+      decoded = jwt.verify(token, CUSTOMER_JWT_SECRET);
+    } catch (err) {
+      return res.status(400).json({ error: 'El enlace de recuperación es inválido o ha expirado.' });
+    }
+    
+    if (!decoded.resetUserId) {
+      return res.status(400).json({ error: 'Enlace de recuperación inválido.' });
+    }
+    
+    const passwordHash = await bcrypt.hash(password, 12);
+    await dbQuery.run("UPDATE users SET password = ? WHERE id = ?", [passwordHash, decoded.resetUserId]);
+    
+    res.json({ success: true, message: 'Tu contraseña ha sido restablecida exitosamente.' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: 'Ocurrió un error al restablecer la contraseña.' });
+  }
+});
+
+
+/* --- CUSTOMER APIS --- */
+
+// POST Customer Register
+app.post('/api/customer/register', async (req, res) => {
+  const { name, email, phone, password } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Nombre, correo y contraseña son obligatorios.' });
+  }
+  try {
+    const existing = await dbQuery.get("SELECT id FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
+    if (existing) {
+      return res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
+    }
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(password, salt);
+    
+    const parts = name.trim().split(/\s+/);
+    const nombre = parts[0] || '';
+    const apellido_pat = parts[1] || '';
+    const apellido_mat = parts.slice(2).join(' ') || '';
+    
+    await dbQuery.run(`
+      INSERT INTO users (nombre, apellido_pat, apellido_mat, email, telefono, password, verified)
+      VALUES (?, ?, ?, ?, ?, ?, 1)
+    `, [nombre, apellido_pat, apellido_mat, email.trim().toLowerCase(), phone ? phone.trim() : '', hash]);
+    
+    const user = await dbQuery.get("SELECT id FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
+    const token = jwt.sign({ id: user.id, email: email.trim().toLowerCase(), name: name.trim() }, CUSTOMER_JWT_SECRET, { expiresIn: '30d' });
+    
+    res.json({ success: true, token, customer: { id: user.id, name: name.trim(), email: email.trim().toLowerCase() } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al registrar la cuenta.' });
+  }
+});
+
+// POST Customer Login
+app.post('/api/customer/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Correo y contraseña son obligatorios.' });
+  }
+  try {
+    const user = await dbQuery.get("SELECT * FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
+    if (!user) {
+      return res.status(401).json({ error: 'El correo o la contraseña son incorrectos.' });
+    }
+    if (user.verified !== 1) {
+      return res.status(401).json({ error: 'Tu cuenta no está verificada. Por favor, verifica tu correo primero.' });
+    }
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      return res.status(401).json({ error: 'El correo o la contraseña son incorrectos.' });
+    }
+    
+    const fullName = `${user.nombre} ${user.apellido_pat} ${user.apellido_mat}`.trim();
+    const token = jwt.sign({ id: user.id, email: user.email, name: fullName }, CUSTOMER_JWT_SECRET, { expiresIn: '30d' });
+    
+    res.json({
+      success: true,
+      token,
+      customer: {
+        id: user.id,
+        name: fullName,
+        email: user.email,
+        phone: user.telefono
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error en el inicio de sesión.' });
+  }
+});
+
+// GET Customer Profile Info
+app.get('/api/customer/profile', authenticateCustomer, async (req, res) => {
+  try {
+    const user = await dbQuery.get("SELECT id, nombre, apellido_pat, apellido_mat, email, telefono as phone, created_at FROM users WHERE id = ?", [req.customer.id]);
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+    
+    const fullName = `${user.nombre} ${user.apellido_pat} ${user.apellido_mat}`.trim();
+    res.json({
+      id: user.id,
+      name: fullName,
+      nombre: user.nombre,
+      apellido_pat: user.apellido_pat,
+      apellido_mat: user.apellido_mat,
+      email: user.email,
+      phone: user.phone,
+      created_at: user.created_at
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener perfil del cliente.' });
+  }
+});
+
+// PUT Update Customer Profile Info
+app.put('/api/customer/profile', authenticateCustomer, async (req, res) => {
+  const { nombre, apellido_pat, apellido_mat, name, phone, password } = req.body;
+  
+  let finalNombre = nombre;
+  let finalPat = apellido_pat;
+  let finalMat = apellido_mat;
+  
+  if (!finalNombre && name) {
+    const parts = name.trim().split(/\s+/);
+    finalNombre = parts[0] || '';
+    finalPat = parts[1] || '';
+    finalMat = parts.slice(2).join(' ') || '';
+  }
+  
+  if (!finalNombre) {
+    return res.status(400).json({ error: 'El nombre es obligatorio.' });
+  }
+  
+  try {
+    if (password && password.trim().length >= 8) {
+      const passwordHash = await bcrypt.hash(password.trim(), 12);
+      await dbQuery.run(
+        "UPDATE users SET nombre = ?, apellido_pat = ?, apellido_mat = ?, telefono = ?, password = ? WHERE id = ?",
+        [finalNombre, finalPat || '', finalMat || '', phone || '', passwordHash, req.customer.id]
+      );
+    } else {
+      await dbQuery.run(
+        "UPDATE users SET nombre = ?, apellido_pat = ?, apellido_mat = ?, telefono = ? WHERE id = ?",
+        [finalNombre, finalPat || '', finalMat || '', phone || '', req.customer.id]
+      );
+    }
+    res.json({ success: true, message: 'Perfil actualizado exitosamente.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al actualizar el perfil.' });
+  }
+});
+
+// GET Customer Purchase History
+app.get('/api/customer/orders', authenticateCustomer, async (req, res) => {
+  try {
+    const orders = await dbQuery.all("SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC", [req.customer.id]);
+    
+    const customerRatings = await dbQuery.all("SELECT product_id, order_id, rating FROM ratings WHERE customer_id = ?", [req.customer.id]);
+    const ratedMap = {};
+    customerRatings.forEach(r => {
+      ratedMap[`${r.order_id}-${r.product_id}`] = r.rating;
+    });
+    
+    const mapped = orders.map(o => {
+      const items = JSON.parse(o.items || '[]');
+      const itemsWithRating = items.map(item => ({
+        ...item,
+        userRating: ratedMap[`${o.id}-${item.id}`] || 0
+      }));
+      return {
+        ...o,
+        items: itemsWithRating
+      };
+    });
+    res.json(mapped);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener el historial de pedidos.' });
+  }
+});
+
+// POST Favorite (Toggle)
+app.post('/api/customer/favorites', authenticateCustomer, async (req, res) => {
+  const { productId } = req.body;
+  if (!productId) return res.status(400).json({ error: 'El ID del producto es requerido.' });
+  
+  try {
+    const existing = await dbQuery.get("SELECT * FROM favorites WHERE customer_id = ? AND product_id = ?", [req.customer.id, productId]);
+    
+    if (existing) {
+      await dbQuery.run("DELETE FROM favorites WHERE customer_id = ? AND product_id = ?", [req.customer.id, productId]);
+      res.json({ success: true, saved: false });
+    } else {
+      await dbQuery.run("INSERT INTO favorites (customer_id, product_id) VALUES (?, ?)", [req.customer.id, productId]);
+      res.json({ success: true, saved: true });
+    }
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al actualizar favoritos.' });
+  }
+});
+
+// GET Customer Favorites
+app.get('/api/customer/favorites', authenticateCustomer, async (req, res) => {
+  try {
+    const rows = await dbQuery.all(`
+      SELECT p.* FROM products p
+      JOIN favorites f ON p.id = f.product_id
+      WHERE f.customer_id = ? AND p.status = 'active'
+    `, [req.customer.id]);
+    
+    // Fetch average ratings
+    const ratingsData = await dbQuery.all("SELECT product_id, AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings GROUP BY product_id");
+    const ratingsMap = {};
+    ratingsData.forEach(r => {
+      ratingsMap[r.product_id] = {
+        average: r.avgRating ? parseFloat(r.avgRating.toFixed(1)) : 0,
+        count: r.countRating || 0
+      };
+    });
+
+    const mapped = rows.map(p => {
+      return {
+        ...p,
+        price: calculatePrice(p.supplier_price),
+        images: JSON.parse(p.images || '[]'),
+        sizes: JSON.parse(p.sizes || '[]'),
+        isFavorite: true,
+        rating: ratingsMap[p.id] || { average: 0, count: 0 }
+      };
+    });
+    
+    res.json(mapped);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener favoritos.' });
+  }
+});
+
+// POST Rate Product (Order Rating)
+app.post('/api/customer/orders/:orderId/rate', authenticateCustomer, async (req, res) => {
+  const { productId, rating } = req.body;
+  const { orderId } = req.params;
+  
+  const r = parseInt(rating);
+  if (!productId || isNaN(r) || r < 1 || r > 5) {
+    return res.status(400).json({ error: 'Producto y calificación (1-5) válidos son requeridos.' });
+  }
+  
+  try {
+    const order = await dbQuery.get("SELECT * FROM orders WHERE id = ? AND customer_id = ? AND status IN ('paid', 'purchased_on_supplier', 'shipped')", [orderId, req.customer.id]);
+    if (!order) {
+      return res.status(400).json({ error: 'No se encontró una compra elegible para calificar.' });
+    }
+    
+    const items = JSON.parse(order.items || '[]');
+    const hasProduct = items.some(item => item.id === productId);
+    if (!hasProduct) {
+      return res.status(400).json({ error: 'El producto no forma parte de este pedido.' });
+    }
+    
+    await dbQuery.run(`
+      INSERT INTO ratings (customer_id, product_id, order_id, rating)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(customer_id, product_id, order_id) DO UPDATE SET rating = excluded.rating
+    `, [req.customer.id, productId, orderId, r]);
+    
+    res.json({ success: true, rating: r });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al registrar la calificación.' });
+  }
+});
+
+// GET Trends (Best Sellers)
+app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) => {
+  try {
+    const orders = await dbQuery.all("SELECT items FROM orders WHERE status IN ('paid', 'purchased_on_supplier', 'shipped')");
+    
+    const salesMap = {};
+    orders.forEach(order => {
+      try {
+        const items = JSON.parse(order.items || '[]');
+        items.forEach(item => {
+          const pid = item.id;
+          if (pid) {
+            salesMap[pid] = (salesMap[pid] || 0) + (item.qty || 1);
+          }
+        });
+      } catch (e) {
+        // ignore
+      }
+    });
+    
+    const products = await dbQuery.all("SELECT * FROM products WHERE status = 'active'");
+    
+    // Fetch average ratings
+    const ratingsData = await dbQuery.all("SELECT product_id, AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings GROUP BY product_id");
+    const ratingsMap = {};
+    ratingsData.forEach(r => {
+      ratingsMap[r.product_id] = {
+        average: r.avgRating ? parseFloat(r.avgRating.toFixed(1)) : 0,
+        count: r.countRating || 0
+      };
+    });
+
+    const customerId = req.customer ? req.customer.id : null;
+    const favoriteIds = new Set();
+    if (customerId) {
+      const favs = await dbQuery.all("SELECT product_id FROM favorites WHERE customer_id = ?", [customerId]);
+      favs.forEach(f => favoriteIds.add(f.product_id));
+    }
+
+    const mappedProducts = products.map(p => {
+      const currentPrice = calculatePrice(p.supplier_price);
+      return {
+        ...p,
+        price: currentPrice,
+        images: JSON.parse(p.images || '[]'),
+        sizes: JSON.parse(p.sizes || '[]'),
+        isFavorite: customerId ? favoriteIds.has(p.id) : false,
+        rating: ratingsMap[p.id] || { average: 0, count: 0 },
+        salesCount: salesMap[p.id] || 0
+      };
+    });
+    
+    // Sort by salesCount desc, then fall back to normal order
+    mappedProducts.sort((a, b) => b.salesCount - a.salesCount);
+    
+    res.json(mappedProducts);
+  } catch (err) {
+    console.error('Trends error:', err);
+    res.status(500).json({ error: 'Error al obtener tendencias.' });
+  }
+});
+
+
+/* --- ADMIN APIS (JWT Protected) --- */
+
+// POST Admin Login
+app.post('/api/admin/login', rateLimiter(5, 60000), async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Usuario y contraseña son requeridos.' });
+  }
+  
+  try {
+    const user = await dbQuery.get("SELECT * FROM admins WHERE username = ?", [username]);
+    if (!user) return res.status(401).json({ error: 'Credenciales inválidas.' });
+    
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Credenciales inválidas.' });
+    
+    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ success: true, token });
+  } catch (err) {
+    res.status(500).json({ error: 'Error en el inicio de sesión.' });
+  }
+});
+
+// GET All Orders list
+app.get('/api/admin/orders', authenticateAdmin, async (req, res) => {
+  try {
+    const orders = await dbQuery.all("SELECT * FROM orders ORDER BY created_at DESC");
+    const mapped = orders.map(o => ({
+      ...o,
+      items: JSON.parse(o.items)
+    }));
+    res.json(mapped);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener los pedidos.' });
+  }
+});
+
+// POST Ship Order (Sets carrier and tracking ID)
+app.post('/api/admin/orders/:id/ship', authenticateAdmin, async (req, res) => {
+  const { carrier, trackingNumber } = req.body;
+  if (!carrier || !trackingNumber) {
+    return res.status(400).json({ error: 'Paquetería y número de guía son requeridos.' });
+  }
+  
+  try {
+    const order = await dbQuery.get("SELECT * FROM orders WHERE id = ?", [req.params.id]);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
+    
+    await dbQuery.run(`
+      UPDATE orders 
+      SET status = 'shipped', tracking_number = ?, shipping_carrier = ?, tracking_status = 'recolectado' 
+      WHERE id = ?
+    `, [trackingNumber, carrier, req.params.id]);
+    
+    console.log(`Order ${req.params.id} marked as SHIPPED via ${carrier} with guide ${trackingNumber}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al actualizar despacho del pedido.' });
+  }
+});
+
+// POST Update Order Tracking Details (Admin only)
+app.post('/api/admin/orders/:id/tracking', authenticateAdmin, async (req, res) => {
+  const { tracking_status, tracking_number, shipping_carrier } = req.body;
+  const validStatuses = ['compra_realizada', 'recolectado', 'centro_distribucion', 'en_ruta', 'entregado'];
+  
+  if (!tracking_status || !validStatuses.includes(tracking_status)) {
+    return res.status(400).json({ error: 'Estado de seguimiento no válido.' });
+  }
+  
+  try {
+    const order = await dbQuery.get("SELECT * FROM orders WHERE id = ?", [req.params.id]);
+    if (!order) return res.status(404).json({ error: 'Pedido no encontrado.' });
+    
+    let newOrderStatus = order.status;
+    if (tracking_status === 'compra_realizada') {
+      newOrderStatus = 'paid';
+    } else {
+      newOrderStatus = 'shipped';
+    }
+    
+    await dbQuery.run(`
+      UPDATE orders 
+      SET tracking_status = ?, tracking_number = ?, shipping_carrier = ?, status = ?
+      WHERE id = ?
+    `, [
+      tracking_status, 
+      tracking_number !== undefined ? tracking_number.trim() : order.tracking_number, 
+      shipping_carrier !== undefined ? shipping_carrier.trim() : order.shipping_carrier, 
+      newOrderStatus, 
+      req.params.id
+    ]);
+    
+    console.log(`Order ${req.params.id} tracking updated: status=${tracking_status}, carrier=${shipping_carrier}, trackingNumber=${tracking_number}`);
+    res.json({ success: true, trackingStatus: tracking_status });
+  } catch (err) {
+    console.error('Error updating order tracking:', err);
+    res.status(500).json({ error: 'Error interno al actualizar el seguimiento del pedido.' });
+  }
+});
+
+// GET Admin Dashboard Data Analytics
+app.get('/api/admin/analytics', authenticateAdmin, async (req, res) => {
+  try {
+    // 1. Core aggregates
+    const salesData = await dbQuery.get("SELECT SUM(total) as revenue, COUNT(*) as count FROM orders WHERE status != 'pending'");
+    const totalRevenue = salesData.revenue || 0;
+    const salesCount = salesData.count || 0;
+    
+    const pendingData = await dbQuery.get("SELECT COUNT(*) as count FROM orders WHERE status = 'pending'");
+    const abandonedCarts = pendingData.count || 0;
+    
+    // Conversions: approved orders / total orders logged
+    const totalLogged = salesCount + abandonedCarts;
+    const conversionRate = totalLogged > 0 ? ((salesCount / totalLogged) * 100).toFixed(1) : 0;
+    
+    // 2. Hour Analysis (0 - 23)
+    const hourRows = await dbQuery.all(`
+      SELECT STRFTIME('%H', created_at) as hour, COUNT(*) as count, SUM(total) as revenue 
+      FROM orders 
+      WHERE status != 'pending' 
+      GROUP BY hour
+    `);
+    
+    // 3. Gender/Category Analysis
+    const orderRows = await dbQuery.all("SELECT items FROM orders WHERE status != 'pending'");
+    const genderStats = { 'Caballero': 0, 'Dama': 0, 'Niños': 0, 'Unisex': 0 };
+    
+    for (const row of orderRows) {
+      try {
+        const items = JSON.parse(row.items);
+        for (const item of items) {
+          // Look up product category
+          const prod = await dbQuery.get("SELECT gender FROM products WHERE sku = ?", [item.sku]);
+          const itemGender = prod ? prod.gender : 'Unisex';
+          genderStats[itemGender] = (genderStats[itemGender] || 0) + item.qty;
+        }
+      } catch (e) {
+        // ignore JSON parse errors
+      }
+    }
+    
+    res.json({
+      summary: {
+        revenue: totalRevenue,
+        salesCount: salesCount,
+        abandonedCarts: abandonedCarts,
+        conversionRate: `${conversionRate}%`,
+        ticketAverage: salesCount > 0 ? Math.round(totalRevenue / salesCount) : 0
+      },
+      hours: hourRows,
+      gender: genderStats
+    });
+    
+  } catch (err) {
+    console.error('Analytics error:', err);
+    res.status(500).json({ error: 'Error al compilar analíticas.' });
+  }
+});
+
+// GET Detailed Financial Sales Report
+app.get('/api/admin/reports', authenticateAdmin, async (req, res) => {
+  try {
+    // Fetch all paid orders (exclude 'pending' which are just abandoned carts)
+    const orders = await dbQuery.all(
+      "SELECT * FROM orders WHERE status != 'pending' ORDER BY created_at DESC"
+    );
+
+    let totalRevenue = 0;
+    let totalCost = 0;
+    const enrichedOrders = [];
+
+    for (const order of orders) {
+      let items = [];
+      try { items = JSON.parse(order.items || '[]'); } catch (e) { items = []; }
+
+      // Calculate supplier cost for this order by looking up each SKU's supplier_price
+      let orderCost = 0;
+      for (const item of items) {
+        const prod = await dbQuery.get(
+          "SELECT supplier_price FROM products WHERE sku = ?", [item.sku]
+        );
+        const supplierPrice = prod ? (prod.supplier_price || 0) : 0;
+        orderCost += supplierPrice * (item.qty || 1);
+      }
+
+      totalRevenue += order.total || 0;
+      totalCost    += orderCost;
+
+      enrichedOrders.push({
+        id: order.id,
+        created_at: order.created_at,
+        customer_name: order.customer_name,
+        customer_email: order.customer_email,
+        status: order.status,
+        items: items,
+        revenue: Math.round(order.total || 0),
+        cost: Math.round(orderCost)
+      });
+    }
+
+    const totalProfit = totalRevenue - totalCost;
+    const totalMargin = totalRevenue > 0
+      ? ((totalProfit / totalRevenue) * 100).toFixed(1)
+      : '0.0';
+
+    res.json({
+      summary: {
+        revenue: Math.round(totalRevenue),
+        cost:    Math.round(totalCost),
+        profit:  Math.round(totalProfit),
+        margin:  totalMargin
+      },
+      orders: enrichedOrders
+    });
+
+  } catch (err) {
+    console.error('Reports error:', err);
+    res.status(500).json({ error: 'Error al generar el reporte financiero.' });
+  }
+});
+
+// GET Detailed Financial Report as CSV
+app.get('/api/admin/reports/csv', authenticateAdmin, async (req, res) => {
+  try {
+    const orders = await dbQuery.all(
+      "SELECT * FROM orders WHERE status != 'pending' ORDER BY created_at DESC"
+    );
+
+    let csv = "Folio,Fecha,Cliente,Email,Telefono,Producto,SKU,Talla,Color,Cantidad,Ingreso (MXN),Costo Proveedor (MXN),Ganancia (MXN),Margen (%),Estatus\r\n";
+
+    for (const order of orders) {
+      let items = [];
+      try { items = JSON.parse(order.items || '[]'); } catch (e) { items = []; }
+
+      for (const item of items) {
+        const prod = await dbQuery.get("SELECT supplier_price FROM products WHERE sku = ?", [item.sku]);
+        const supplierPrice = prod ? (prod.supplier_price || 0) : 0;
+        const itemRevenue = (item.price || 0) * (item.qty || 1);
+        const itemCost    = supplierPrice * (item.qty || 1);
+        const itemProfit  = itemRevenue - itemCost;
+        const itemMargin  = itemRevenue > 0 ? ((itemProfit / itemRevenue) * 100).toFixed(1) : '0.0';
+
+        csv += [
+          `"${order.id}"`,
+          `"${order.created_at}"`,
+          `"${order.customer_name}"`,
+          `"${order.customer_email}"`,
+          `"${order.customer_phone}"`,
+          `"${(item.title || '').replace(/"/g, '""')}"`,
+          `"${item.sku || ''}"`,
+          `"${item.size || ''}"`,
+          `"${item.color || ''}"`,
+          item.qty || 1,
+          Math.round(itemRevenue),
+          Math.round(itemCost),
+          Math.round(itemProfit),
+          itemMargin,
+          `"${order.status}"`
+        ].join(',') + '\r\n';
+      }
+    }
+
+    res.header('Content-Type', 'text/csv; charset=utf-8');
+    res.attachment('PAPS_Reporte_Financiero.csv');
+    res.send('\uFEFF' + csv); // BOM for Excel UTF-8 compatibility
+  } catch (err) {
+    console.error('CSV export error:', err);
+    res.status(500).json({ error: 'Error al exportar reporte CSV.' });
+  }
+});
+
+// GET Export Analytics to CSV format
+app.get('/api/admin/export-csv', authenticateAdmin, async (req, res) => {
+  try {
+    const orders = await dbQuery.all("SELECT id, customer_name, customer_email, customer_phone, total, status, created_at FROM orders ORDER BY created_at DESC");
+    
+    let csv = "Folio,Cliente,Email,Telefono,Monto Total,Estatus,Fecha\r\n";
+    for (const o of orders) {
+      csv += `"${o.id}","${o.customer_name}","${o.customer_email}","${o.customer_phone}",${o.total},"${o.status}","${o.created_at}"\r\n`;
+    }
+    
+    res.header('Content-Type', 'text/csv');
+    res.attachment('PAPS_Reporte_Ventas.csv');
+    res.send(csv);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al exportar reporte.' });
+  }
+});
+
+// GET Abandoned Carts Details
+app.get('/api/admin/abandoned', authenticateAdmin, async (req, res) => {
+  try {
+    const carts = await dbQuery.all("SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at DESC");
+    const mapped = carts.map(c => ({
+      ...c,
+      items: JSON.parse(c.items)
+    }));
+    res.json(mapped);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener carritos abandonados.' });
+  }
+});
+
+// POST Trigger Scraper
+app.post('/api/admin/scrape', authenticateAdmin, async (req, res) => {
+  const { searchUrl, limit, category } = req.body;
+  if (!searchUrl) return res.status(400).json({ error: 'URL del catálogo es requerida.' });
+  
+  const productLimit = parseInt(limit) || 30;
+  const targetCategory = category || 'General';
+  console.log(`[Admin Scraper Request] Starting scrape for URL: ${searchUrl}, limit: ${productLimit}, category: ${targetCategory}`);
+  
+  // Save URL as a catalog source so it updates every hour automatically
+  try {
+    await dbQuery.run(`
+      INSERT INTO catalog_sources (url, products_limit, category) 
+      VALUES (?, ?, ?)
+      ON CONFLICT(url) DO UPDATE SET 
+        products_limit = excluded.products_limit,
+        category = excluded.category
+    `, [searchUrl, productLimit, targetCategory]);
+    console.log(`[Admin Scraper] Catalog source saved/updated in DB for auto-sync.`);
+  } catch (dbErr) {
+    console.error(`[Admin Scraper] Error saving catalog source in DB:`, dbErr.message);
+  }
+  
+  // Run scraper asynchronously in background so the request responds instantly
+  runScraper(searchUrl, productLimit, targetCategory)
+    .then(saved => {
+      console.log(`[Admin Scraper Async] Scraper completed. Saved: ${saved} products.`);
+    })
+    .catch(err => {
+      console.error(`[Admin Scraper Async] Scraper failed:`, err);
+    });
+    
+  res.json({ success: true, message: 'La sincronización ha comenzado en segundo plano.' });
+});
+
+// GET All Catalog Sources
+app.get('/api/admin/catalog-sources', authenticateAdmin, async (req, res) => {
+  try {
+    const sources = await dbQuery.all("SELECT * FROM catalog_sources ORDER BY created_at DESC");
+    res.json(sources);
+  } catch (err) {
+    res.status(500).json({ error: 'Error al obtener las fuentes del catálogo.' });
+  }
+});
+
+// DELETE A Catalog Source
+app.delete('/api/admin/catalog-sources/:id', authenticateAdmin, async (req, res) => {
+  try {
+    await dbQuery.run("DELETE FROM catalog_sources WHERE id = ?", [req.params.id]);
+    console.log(`[Admin] Catalog source ID ${req.params.id} deleted.`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al eliminar la fuente del catálogo.' });
+  }
+});
+
+// DELETE A Category and all its associated products and catalog sources
+app.delete('/api/admin/categories/:categoryName', authenticateAdmin, async (req, res) => {
+  const { categoryName } = req.params;
+  const normalizedName = categoryName.trim();
+  
+  try {
+    // Use LOWER(TRIM()) for case-insensitive matching to catch any casing/spacing mismatches
+    const deletedProducts = await dbQuery.run(
+      "DELETE FROM products WHERE LOWER(TRIM(category)) = LOWER(TRIM(?))", 
+      [normalizedName]
+    );
+    const deletedSources = await dbQuery.run(
+      "DELETE FROM catalog_sources WHERE LOWER(TRIM(category)) = LOWER(TRIM(?))", 
+      [normalizedName]
+    );
+    
+    console.log(`[Admin] Category "${normalizedName}" deleted: ${deletedProducts.changes} products, ${deletedSources.changes} catalog sources removed.`);
+    res.json({ 
+      success: true, 
+      deletedProducts: deletedProducts.changes, 
+      deletedSources: deletedSources.changes 
+    });
+  } catch (err) {
+    console.error('Error deleting category:', err);
+    res.status(500).json({ error: 'Error al eliminar la categoría y sus elementos asociados.' });
+  }
+});
+
+// Function to run the hourly sync of all catalog sources
+async function runHourlySync() {
+  console.log('\n=== Hourly Background Sync Started ===');
+  try {
+    const sources = await dbQuery.all("SELECT * FROM catalog_sources");
+    console.log(`Found ${sources.length} active catalog sources to sync.`);
+    for (const source of sources) {
+      console.log(`Syncing source: ${source.url} (limit: ${source.products_limit}, category: ${source.category})`);
+      try {
+        const savedCount = await runScraper(source.url, source.products_limit, source.category || 'General');
+        console.log(`Successfully synced ${savedCount} products for source ID ${source.id}`);
+      } catch (scrapeErr) {
+        console.error(`Scraper error for source ID ${source.id}:`, scrapeErr.message);
+      }
+    }
+  } catch (err) {
+    console.error('Error running hourly background sync:', err.message);
+  }
+  console.log('=== Hourly Background Sync Completed ===\n');
+}
+
+// Schedule hourly sync
+setInterval(runHourlySync, 3600000); // 1 hour in ms
+
+// Also run once on startup after 5 seconds to verify it works and sync initial data
+setTimeout(runHourlySync, 5000);
+
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`PAPS store server running securely at http://localhost:${PORT}`);
+});
+// Server reload trigger 2

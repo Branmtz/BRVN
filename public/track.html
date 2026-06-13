@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BRVN — Rastrear Pedido</title>
+  <link rel="stylesheet" href="/css/styles.css?v=1.6">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <!-- Header Navigation -->
+  <header>
+    <div class="container nav-container">
+      <a href="/" class="logo brand-logo">
+        <span class="logo-title">BRVN</span>
+        <span class="logo-sub">CALZADO</span>
+      </a>
+      <div class="announcement-banner">
+        <span id="announcement-text">🎁 ¡Regalo en tu Primera Compra, ¡Regístrate ahora! Código: PAPSGIFT</span>
+      </div>
+      <div class="nav-icons">
+        <a href="/admin.html" title="Administración"><i class="fa-regular fa-user"></i></a>
+        <a href="/cart.html" class="cart-icon" title="Carrito">
+          <i class="fa-solid fa-bag-shopping"></i>
+          <span id="cart-count">0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Tracking Container -->
+  <main class="container">
+    <div class="tracking-card">
+      <div class="tracking-header">
+        <h2>Rastreo de Pedido</h2>
+        <p style="color: var(--text-secondary); font-size: 14px;">Ingresa tus datos para consultar el estado actual de tu compra.</p>
+      </div>
+
+      <!-- Search Form -->
+      <form id="tracking-form" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="form-group">
+          <label for="track-folio">Folio de Compra</label>
+          <input type="text" id="track-folio" required placeholder="BRVN-1001" style="text-transform: uppercase;">
+        </div>
+        <div class="form-group">
+          <label for="track-contact">Correo Electrónico o Teléfono</label>
+          <input type="text" id="track-contact" required placeholder="juan@correo.com o 5545598011">
+        </div>
+        <button type="submit" class="buy-button" style="margin-top: 8px;">
+          <i class="fa-solid fa-magnifying-glass"></i> Consultar Estado
+        </button>
+      </form>
+
+      <!-- Result Container (Initially hidden) -->
+      <div id="tracking-result" style="display: none; margin-top: 40px; border-top: 1px solid var(--border-color); padding-top: 32px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 24px;">
+          <h3 style="font-size: 20px; font-weight: 600;" id="result-folio">Folio: PAPS-1001</h3>
+          <span style="font-size: 13px; color: var(--text-secondary);" id="result-date">Fecha: 10/06/2026</span>
+        </div>
+
+        <!-- Timeline -->
+        <div class="tracking-timeline" id="timeline">
+          <!-- Step 1: Compra realizada con éxito -->
+          <div class="timeline-step" id="step-compra_realizada">
+            <div class="timeline-dot"></div>
+            <div class="timeline-title">Compra realizada con éxito</div>
+            <div class="timeline-desc">Tu pago ha sido procesado de forma segura y el pedido está registrado.</div>
+          </div>
+          <!-- Step 2: Recolectado por la paquetería -->
+          <div class="timeline-step" id="step-recolectado">
+            <div class="timeline-dot"></div>
+            <div class="timeline-title">Recolectado por la paquetería</div>
+            <div class="timeline-desc">El paquete ha sido recolectado por el mensajero y está en tránsito.</div>
+          </div>
+          <!-- Step 3: Llegada a centro de distribución -->
+          <div class="timeline-step" id="step-centro_distribucion">
+            <div class="timeline-dot"></div>
+            <div class="timeline-title">Llegada a centro de distribución</div>
+            <div class="timeline-desc">El paquete ingresó al centro de clasificación de la paquetería.</div>
+          </div>
+          <!-- Step 4: En ruta de entrega (repartidor local en camino) -->
+          <div class="timeline-step" id="step-en_ruta">
+            <div class="timeline-dot"></div>
+            <div class="timeline-title">En ruta de entrega</div>
+            <div class="timeline-desc">El repartidor local se encuentra en ruta hacia tu domicilio.</div>
+          </div>
+          <!-- Step 5: Entregado -->
+          <div class="timeline-step" id="step-entregado">
+            <div class="timeline-dot"></div>
+            <div class="timeline-title">Entregado</div>
+            <div class="timeline-desc">El paquete ha sido entregado satisfactoriamente en tu domicilio.</div>
+          </div>
+        </div>
+
+        <!-- Guide Information Box (If shipped) -->
+        <div class="tracking-info-box" id="shipping-info-box" style="display: none; margin-bottom: 24px;">
+          <h4 style="font-weight: 600; margin-bottom: 8px;"><i class="fa-solid fa-truck"></i> Información de Entrega</h4>
+          <p><strong>Paquetería:</strong> <span id="carrier-name">DHL</span></p>
+          <p><strong>Número de Guía:</strong> <span id="tracking-code">1234567890</span></p>
+          <a href="#" target="_blank" class="tracking-link" id="carrier-link" style="margin-right: 16px;">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i> Seguir en la web de la paquetería
+          </a>
+        </div>
+
+        <!-- Real-Time Logistics Detailed Events (If shipped) -->
+        <div class="tracking-info-box" id="logistics-events-box" style="display: none; border-left: 4px solid #007aff; background-color: rgba(0, 122, 255, 0.01); margin-bottom: 24px;">
+          <h4 style="font-weight: 600; margin-bottom: 12px; color: #007aff; display: flex; align-items: center; gap: 6px;">
+            <i class="fa-solid fa-clock-rotate-left"></i> Historial de Movimientos (LogiBoost)
+          </h4>
+          <div id="logistics-events-list" style="display: flex; flex-direction: column; gap: 16px; margin-top: 12px;">
+            <!-- Rendered from JS -->
+          </div>
+        </div>
+
+        <div style="margin-top: 32px; border-top: 1px dashed var(--border-color); padding-top: 24px;">
+          <h4 style="font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">Productos del pedido</h4>
+          <div id="result-items" style="display: flex; flex-direction: column; gap: 12px;">
+            <!-- Mapped from JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-content">
+      <div>
+        <p>&copy; 2026 Distributed by BRVN Store. Todos los derechos reservados.</p>
+      </div>
+      <div class="footer-links">
+        <a href="/track.html">Rastrear Pedido</a>
+        <a href="/admin.html">Administrador</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/js/app.js?v=1.5"></script>
+  <script src="/js/track.js"></script>
+</body>
+</html>

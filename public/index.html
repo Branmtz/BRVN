@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BRVN — Tienda Oficial</title>
+  <link rel="stylesheet" href="/css/styles.css?v=1.6">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <!-- ══════════════════════════════════════════
+       SPLASH SCREEN — First-visit landing page
+       ══════════════════════════════════════════ -->
+  <div id="splash-screen" onclick="enterStore(event)">
+    <div class="splash-content">
+      <div class="brand-logo splash-logo">
+        <span class="logo-title">BRVN</span>
+        <span class="logo-sub">CALZADO</span>
+      </div>
+    </div>
+    
+    <div class="splash-footer">
+      <div class="splash-footer-text">Explorar Colección</div>
+    </div>
+  </div>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&family=Prata&display=swap');
+
+    @font-face {
+      font-family: 'Joane Bold';
+      src: url('/css/Joane-Bold.woff2') format('woff2'),
+           url('/css/Joane-Bold.woff') format('woff'),
+           url('/css/Joane-Bold.ttf') format('truetype'),
+           url('/css/Joane-Bold.otf') format('opentype');
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    /* Splash overlay */
+    #splash-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.8s ease;
+    }
+    #splash-screen.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    /* Center container */
+    .splash-content {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 100px;
+      transform: translateY(-20px);
+    }
+
+    /* Brand wordmark */
+    .splash-logo {
+      transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .splash-logo .logo-title {
+      font-size: clamp(38px, 8vw, 54px);
+      color: #000000;
+      border-bottom: 2px solid #000000;
+      font-weight: 500;
+      letter-spacing: 0.5em;
+      text-indent: 0.5em;
+    }
+
+    .splash-logo .logo-sub {
+      font-size: clamp(10px, 2.5vw, 14px);
+      letter-spacing: 0.6em;
+      text-indent: 0.6em;
+      color: #333333;
+    }
+
+    /* Hover interactions on the center splash content */
+    .splash-content:hover .splash-logo {
+      transform: scale(1.04);
+    }
+
+    /* Static/Elegant footer text */
+    .splash-footer {
+      position: absolute;
+      bottom: 40px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      pointer-events: none;
+    }
+
+    .splash-footer-text {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 13px;
+      font-style: italic;
+      letter-spacing: 0.2em;
+      color: #b0b0b0;
+      opacity: 0.8;
+      text-transform: capitalize;
+    }
+  </style>
+
+  <script>
+    // Show splash only once per session
+    (function() {
+      if (sessionStorage.getItem('brvn_entered')) {
+        document.getElementById('splash-screen').classList.add('hidden');
+      }
+    })();
+
+    function enterStore(event) {
+      if (event) {
+        event.stopPropagation();
+      }
+      sessionStorage.setItem('brvn_entered', '1');
+      const splash = document.getElementById('splash-screen');
+      splash.classList.add('hidden');
+    }
+  </script>
+
+
+  <!-- Header Navigation -->
+  <header>
+    <div class="container nav-container">
+      <!-- Logo -->
+      <a href="/" class="logo brand-logo">
+        <span class="logo-title">BRVN</span>
+        <span class="logo-sub">CALZADO</span>
+      </a>
+
+      <!-- Desktop Announcement Banner -->
+      <div class="announcement-banner">
+        <span id="announcement-text">🎁 ¡Regalo en tu Primera Compra, ¡Regístrate ahora! Código: PAPSGIFT</span>
+      </div>
+
+      <!-- Navigation Icons -->
+      <div class="nav-icons">
+        <a href="javascript:void(0)" onclick="switchTab('menu')" title="Mi Cuenta" class="nav-desktop-only"><i class="fa-regular fa-user"></i></a>
+        <a href="/cart.html" class="cart-icon nav-desktop-only" title="Carrito">
+          <i class="fa-solid fa-bag-shopping"></i>
+          <span id="cart-count">0</span>
+        </a>
+      </div>
+
+      <!-- Mobile Search and Filters (shown only on mobile under logo) -->
+      <div class="mobile-search-filters">
+        <div class="search-box">
+          <input type="text" id="mobile-search-input" placeholder="Buscar modelo, marca, SKU o ID..." onkeyup="searchProductsMobile()">
+        </div>
+        <div class="dropdowns-container">
+          <select id="mobile-gender-select" onchange="filterByGenderMobile(this.value)" class="filter-select">
+            <option value="all">Géneros</option>
+            <option value="Caballero">Caballero</option>
+            <option value="Dama">Dama</option>
+            <option value="Niños">Niños</option>
+          </select>
+          <select id="mobile-category-select" onchange="filterByCategoryMobile(this.value)" class="filter-select">
+            <option value="all">Categorías</option>
+          </select>
+          <select id="mobile-brand-select" onchange="filterByBrandMobile(this.value)" class="filter-select">
+            <option value="all">Marcas</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Views Container -->
+  <main class="container">
+    
+    <!-- ══════════════════════════════════════════
+         HOME VIEW (Catalog & Filtering)
+         ══════════════════════════════════════════ -->
+    <div id="home-view" class="view-section active">
+      <!-- Hero Section -->
+      <section class="hero-section" style="padding-top: 40px;">
+        <h1>Menos ruido. Más estilo.</h1>
+        <p>Tu clóset ya los está esperando. Solo haz clic y recíbelos en casa.</p>
+      </section>
+
+      <div class="filters-bar">
+        <!-- Search Box -->
+        <div class="search-box">
+          <input type="text" id="search-input" placeholder="Buscar modelo, marca, SKU o ID..." onkeyup="searchProducts()">
+        </div>
+        
+        <!-- Dropdowns Container -->
+        <div class="dropdowns-container">
+          <!-- Gender Select -->
+          <select id="gender-select" onchange="filterByGender(this.value)" class="filter-select">
+            <option value="all">Todos los Géneros</option>
+            <option value="Caballero">Caballero</option>
+            <option value="Dama">Dama</option>
+            <option value="Niños">Niños</option>
+          </select>
+
+          <!-- Category Select -->
+          <select id="category-select" onchange="filterByCategory(this.value)" class="filter-select">
+            <option value="all">Todas las Categorías</option>
+          </select>
+
+          <!-- Brand Select -->
+          <select id="brand-select" onchange="filterByBrand(this.value)" class="filter-select">
+            <option value="all">Todas las Marcas</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Product Grid -->
+      <div class="product-grid" id="product-grid">
+        <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-secondary);">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px;"></i>
+          <p>Cargando Productos...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         CATEGORIES VIEW (Dynamic category grid)
+         ══════════════════════════════════════════ -->
+    <div id="categories-view" class="view-section">
+      <section class="hero-section" style="padding: 40px 0 20px; text-align: left;">
+        <h1 style="font-size: 32px; font-weight: 600;">Categorías</h1>
+        <p style="font-size: 14px; color: var(--text-secondary);">Explora nuestra selección organizada de calzado.</p>
+      </section>
+      
+      <div class="categories-grid" id="categories-list-grid">
+        <!-- Renders dynamically -->
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         TRENDS VIEW (Best sellers by volume)
+         ══════════════════════════════════════════ -->
+    <div id="trends-view" class="view-section">
+      <section class="hero-section" style="padding: 40px 0 20px; text-align: left;">
+        <h1 style="font-size: 32px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+          <i class="fa-solid fa-fire" style="color: #ff9500;"></i> Los Más Vendidos
+        </h1>
+        <p style="font-size: 14px; color: var(--text-secondary);">Modelos preferidos por nuestros compradores en base a volumen real de ventas.</p>
+      </section>
+
+      <div class="product-grid" id="trends-product-grid">
+        <!-- Renders dynamically -->
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         PROFILE / MENU VIEW (Auth or Portal)
+         ══════════════════════════════════════════ -->
+    <div id="menu-view" class="view-section">
+      <!-- 1. Authentication panel (not logged in) -->
+      <div id="auth-section" class="auth-container">
+        <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); text-align: center; padding: 14px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+          <i class="fa-solid fa-gift" style="color: #ff3b30;"></i> Regalo en tu Primera Compra, ¡Regístrate ahora!
+        </div>
+        <div class="auth-tabs">
+          <div class="auth-tab-btn active" onclick="switchAuthTab('login')" id="auth-tab-login">Ingresar</div>
+          <div class="auth-tab-btn" onclick="window.location.href='/register.html'" id="auth-tab-register">Registrarse</div>
+        </div>
+        
+        <!-- Login Form -->
+        <div id="login-form-wrapper" class="auth-form-wrapper active">
+          <form id="customer-login-form" onsubmit="handleCustomerLogin(event)">
+            <div class="form-group" style="margin-bottom: 16px;">
+              <label for="login-email">Correo Electrónico</label>
+              <input type="email" id="login-email" required placeholder="tu@correo.com">
+            </div>
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label for="login-password">Contraseña</label>
+              <input type="password" id="login-password" required placeholder="••••••••">
+            </div>
+            <button type="submit" class="buy-button">Iniciar Sesión</button>
+            <div style="margin-top: 15px; text-align: center;">
+              <a href="/forgot-password.html" style="font-size: 13px; text-decoration: underline; color: var(--text-secondary);">¿Olvidaste tu contraseña?</a>
+            </div>
+          </form>
+        </div>
+        
+        <!-- Register Form -->
+        <div id="register-form-wrapper" class="auth-form-wrapper">
+          <p style="font-size: 12px; color: var(--text-secondary); text-align: center; margin-bottom: 16px; font-weight: 500;">
+            Crea tu cuenta hoy y recibe un regalo sorpresa con tu primer pedido.
+          </p>
+          <form id="customer-register-form" onsubmit="handleCustomerRegister(event)">
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label for="reg-name">Nombre Completo</label>
+              <input type="text" id="reg-name" required placeholder="Juan Pérez">
+            </div>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label for="reg-email">Correo Electrónico</label>
+              <input type="email" id="reg-email" required placeholder="tu@correo.com">
+            </div>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label for="reg-phone">Teléfono Móvil (10 dígitos)</label>
+              <input type="tel" id="reg-phone" placeholder="5545598011">
+            </div>
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label for="reg-password">Contraseña</label>
+              <input type="password" id="reg-password" required placeholder="Mínimo 6 caracteres">
+            </div>
+            <button type="submit" class="buy-button">Crear Cuenta</button>
+          </form>
+        </div>
+      </div>
+      
+      <!-- 2. Profile Dashboard (logged in) -->
+      <div id="dashboard-section" class="profile-dashboard" style="display: none;">
+        <!-- Left Sidebar Menu -->
+        <div class="profile-sidebar">
+          <button class="sidebar-menu-btn active" onclick="switchDashboardTab('profile')" id="db-tab-btn-profile">
+            <i class="fa-regular fa-user"></i> Perfil
+          </button>
+          <button class="sidebar-menu-btn" onclick="switchDashboardTab('favorites')" id="db-tab-btn-favorites">
+            <i class="fa-regular fa-heart"></i> Guardados
+          </button>
+          <button class="sidebar-menu-btn" onclick="switchDashboardTab('orders')" id="db-tab-btn-orders">
+            <i class="fa-solid fa-receipt"></i> Compras
+          </button>
+          <button class="sidebar-menu-btn" onclick="switchDashboardTab('track')" id="db-tab-btn-track">
+            <i class="fa-solid fa-location-dot"></i> Rastreo
+          </button>
+          <button class="sidebar-menu-btn" onclick="switchDashboardTab('coupons')" id="db-tab-btn-coupons">
+            <i class="fa-solid fa-ticket"></i> Descuentos
+          </button>
+          <button class="sidebar-menu-btn" onclick="handleCustomerLogout()" style="color: #ff3b30; margin-top: 16px;">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i> Cerrar Sesión
+          </button>
+        </div>
+        
+        <!-- Right Content Panels -->
+        <div class="profile-content">
+          <!-- Profile Info tab -->
+          <div id="db-tab-profile" class="profile-tab-section active">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">Mi Perfil</h2>
+            <form id="profile-edit-form" onsubmit="handleProfileUpdate(event)" style="display: flex; flex-direction: column; gap: 16px; max-width: 480px;">
+              <div class="form-group">
+                <label for="profile-edit-name">Nombre Completo</label>
+                <input type="text" id="profile-edit-name" required placeholder="Tu Nombre">
+              </div>
+              <div class="form-group">
+                <label for="profile-edit-email">Correo Electrónico</label>
+                <input type="email" id="profile-edit-email" readonly style="background-color: #f5f5f5; cursor: not-allowed; color: var(--text-secondary);">
+                <span style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; display: block;">El correo electrónico no puede ser modificado.</span>
+              </div>
+              <div class="form-group">
+                <label for="profile-edit-phone">Teléfono Móvil (10 dígitos)</label>
+                <input type="tel" id="profile-edit-phone" placeholder="5545598011">
+              </div>
+              <div class="form-group">
+                <label for="profile-edit-password">Nueva Contraseña (dejar vacío para no cambiar)</label>
+                <input type="password" id="profile-edit-password" placeholder="Mínimo 6 caracteres">
+              </div>
+              <button type="submit" class="buy-button" style="margin-top: 8px; max-width: 200px;">
+                Guardar Cambios
+              </button>
+              <div id="profile-update-message" style="margin-top: 8px; font-size: 13px; font-weight: 600; display: none;"></div>
+            </form>
+            <div class="detail-divider" style="margin: 24px 0 16px;"></div>
+            <div style="font-size: 12px; color: var(--text-secondary);">
+              Miembro desde: <span id="profile-date">-</span>
+            </div>
+          </div>
+          
+          <!-- Saved items / Favorites tab -->
+          <div id="db-tab-favorites" class="profile-tab-section">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">Guardados</h2>
+            <div class="product-grid" id="profile-favorites-grid">
+              <p style="color: var(--text-secondary); grid-column: 1/-1;">No tienes calzados guardados.</p>
+            </div>
+          </div>
+          
+          <!-- Purchase History / Order History tab -->
+          <div id="db-tab-orders" class="profile-tab-section">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">Compras</h2>
+            <div id="profile-orders-list">
+              <div style="text-align: center; padding: 32px; color: var(--text-secondary);">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size: 20px; margin-bottom: 8px;"></i>
+                <p>Cargando tus compras...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tracking / Rastreo tab -->
+          <div id="db-tab-track" class="profile-tab-section">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">Rastreo de Pedido</h2>
+            <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">Ingresa el folio de tu compra y datos de contacto para consultar el estado actual del envío.</p>
+            
+            <form id="db-tracking-form" onsubmit="handleDbTrackingSubmit(event)" style="display: flex; flex-direction: column; gap: 16px; max-width: 480px;">
+              <div class="form-group">
+                <label for="db-track-folio">Folio de Compra</label>
+                <input type="text" id="db-track-folio" required placeholder="BRVN-1001" style="text-transform: uppercase;">
+              </div>
+              <div class="form-group">
+                <label for="db-track-contact">Correo Electrónico o Teléfono</label>
+                <input type="text" id="db-track-contact" required placeholder="juan@correo.com o 5545598011">
+              </div>
+              <button type="submit" class="buy-button" style="margin-top: 8px; max-width: 200px;">
+                <i class="fa-solid fa-magnifying-glass"></i> Consultar Estado
+              </button>
+            </form>
+            
+            <!-- Result Container (Initially hidden) -->
+            <div id="db-tracking-result" style="display: none; margin-top: 32px; border-top: 1px solid var(--border-color); padding-top: 24px;">
+              <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 24px; flex-wrap: wrap; gap: 8px;">
+                <h3 style="font-size: 18px; font-weight: 600;" id="db-result-folio">Folio:</h3>
+                <span style="font-size: 13px; color: var(--text-secondary);" id="db-result-date">Fecha:</span>
+              </div>
+              
+              <!-- Timeline -->
+              <div class="tracking-timeline" id="db-timeline">
+                <div class="timeline-step" id="db-step-compra_realizada">
+                  <div class="timeline-dot"></div>
+                  <div class="timeline-title">Compra realizada con éxito</div>
+                  <div class="timeline-desc">Tu pago ha sido procesado de forma segura y el pedido está registrado.</div>
+                </div>
+                <div class="timeline-step" id="db-step-recolectado">
+                  <div class="timeline-dot"></div>
+                  <div class="timeline-title">Recolectado por la paquetería</div>
+                  <div class="timeline-desc">El paquete ha sido recolectado por el mensajero y está en tránsito.</div>
+                </div>
+                <div class="timeline-step" id="db-step-centro_distribucion">
+                  <div class="timeline-dot"></div>
+                  <div class="timeline-title">Llegada a centro de distribución</div>
+                  <div class="timeline-desc">El paquete ingresó al centro de clasificación de la paquetería.</div>
+                </div>
+                <div class="timeline-step" id="db-step-en_ruta">
+                  <div class="timeline-dot"></div>
+                  <div class="timeline-title">En ruta de entrega</div>
+                  <div class="timeline-desc">El repartidor local se encuentra en ruta hacia tu domicilio.</div>
+                </div>
+                <div class="timeline-step" id="db-step-entregado">
+                  <div class="timeline-dot"></div>
+                  <div class="timeline-title">Entregado</div>
+                  <div class="timeline-desc">El paquete ha sido entregado satisfactoriamente en tu domicilio.</div>
+                </div>
+              </div>
+              
+              <!-- Guide Info Box -->
+              <div class="tracking-info-box" id="db-shipping-info-box" style="display: none; margin-bottom: 24px; background-color: #f9f9f9; padding: 16px; border-radius: 8px; border: 1px solid var(--border-color); margin-top: 24px;">
+                <h4 style="font-weight: 600; margin-bottom: 8px;"><i class="fa-solid fa-truck"></i> Información de Entrega</h4>
+                <p style="margin-bottom: 4px;"><strong>Paquetería:</strong> <span id="db-carrier-name">DHL</span></p>
+                <p style="margin-bottom: 8px;"><strong>Número de Guía:</strong> <span id="db-tracking-code">1234567890</span></p>
+                <a href="#" target="_blank" class="tracking-link" id="db-carrier-link" style="display: inline-block; color: #007aff; font-weight: 600; font-size: 13px; text-decoration: none;">
+                  <i class="fa-solid fa-arrow-up-right-from-square"></i> Seguir en la web de la paquetería
+                </a>
+              </div>
+              
+              <!-- Logistics Real-Time Events -->
+              <div id="db-logistics-events-box" style="display: none; margin-top: 24px;">
+                <h4 style="font-weight: 600; margin-bottom: 12px; font-size: 15px;"><i class="fa-solid fa-clock-rotate-left"></i> Historial de Movimientos</h4>
+                <div id="db-logistics-events-list" style="display: flex; flex-direction: column; gap: 12px;"></div>
+              </div>
+              
+              <!-- Items list -->
+              <div style="margin-top: 24px;">
+                <h4 style="font-weight: 600; margin-bottom: 12px; font-size: 15px;"><i class="fa-solid fa-list"></i> Productos en el Pedido</h4>
+                <div id="db-result-items" style="display: flex; flex-direction: column; gap: 8px;"></div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Coupons list tab -->
+          <div id="db-tab-coupons" class="profile-tab-section">
+            <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">Descuentos Disponibles</h2>
+            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 24px;">Da click en cualquier cupón para copiar el código promocional.</p>
+            
+            <div class="coupon-box">
+              <div style="font-weight: 600; font-size: 14px;">10% de Descuento en tu Primer Pedido</div>
+              <span class="coupon-code" onclick="copyCoupon('MIPRIMERCOMPRA')">MIPRIMERCOMPRA</span>
+            </div>
+            <div class="coupon-box">
+              <div style="font-weight: 600; font-size: 14px;">Regalo en tu Primera Compra</div>
+              <span class="coupon-code" onclick="copyCoupon('PAPSGIFT')">PAPSGIFT</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-content">
+      <div>
+        <p>&copy; 2026 Distributed by BRVN Store. Todos los derechos reservados.</p>
+      </div>
+      <div class="footer-links">
+        <a href="/track.html">Rastrear Pedido</a>
+        <a href="/admin.html">Administrador</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Mobile Bottom Navigation Bar -->
+  <nav class="bottom-nav">
+    <a class="bottom-nav-item active" onclick="switchTab('home')" id="bottom-nav-home">
+      <i class="fa-solid fa-house"></i>
+      <span>Inicio</span>
+    </a>
+    <a class="bottom-nav-item" onclick="switchTab('categories')" id="bottom-nav-categories">
+      <i class="fa-solid fa-layer-group"></i>
+      <span>Categorías</span>
+    </a>
+    <a href="/cart.html" class="bottom-nav-item" id="bottom-nav-cart">
+      <div class="cart-icon-wrapper">
+        <i class="fa-solid fa-bag-shopping"></i>
+        <span class="cart-badge" id="mobile-cart-badge">0</span>
+      </div>
+      <span>Carrito</span>
+    </a>
+    <a class="bottom-nav-item" onclick="switchTab('trends')" id="bottom-nav-trends">
+      <i class="fa-solid fa-fire"></i>
+      <span>Trends</span>
+    </a>
+    <a class="bottom-nav-item" onclick="toggleMobileMenu()" id="bottom-nav-menu">
+      <i class="fa-solid fa-bars"></i>
+      <span>Menú</span>
+    </a>
+  </nav>
+
+  <!-- Mobile Slide-Up Menu Dropdown -->
+  <div id="mobile-menu-overlay" onclick="closeMobileMenu()"></div>
+  <div id="mobile-menu-sheet">
+    <div class="mobile-menu-handle"></div>
+    <div class="mobile-menu-header">
+      <div class="brand-logo" style="width: 100%; text-align: center;">
+        <span class="logo-title" style="font-size: 24px; padding-bottom: 3px; margin-bottom: 3px; border-bottom-width: 1px;">BRVN</span>
+        <span class="logo-sub" style="font-size: 8px;">CALZADO</span>
+      </div>
+    </div>
+    <nav class="mobile-menu-nav">
+      <a class="mobile-menu-item" onclick="openMenuSection('profile')">
+        <div class="mobile-menu-item-icon"><i class="fa-regular fa-user"></i></div>
+        <div class="mobile-menu-item-text">
+          <span class="mobile-menu-item-title">Perfil</span>
+          <span class="mobile-menu-item-sub">Mi cuenta y datos</span>
+        </div>
+        <i class="fa-solid fa-chevron-right mobile-menu-item-arrow"></i>
+      </a>
+      <a class="mobile-menu-item" onclick="openMenuSection('favorites')">
+        <div class="mobile-menu-item-icon"><i class="fa-regular fa-heart"></i></div>
+        <div class="mobile-menu-item-text">
+          <span class="mobile-menu-item-title">Guardados</span>
+          <span class="mobile-menu-item-sub">Artículos favoritos</span>
+        </div>
+        <i class="fa-solid fa-chevron-right mobile-menu-item-arrow"></i>
+      </a>
+      <a class="mobile-menu-item" onclick="openMenuSection('coupons')">
+        <div class="mobile-menu-item-icon"><i class="fa-solid fa-ticket"></i></div>
+        <div class="mobile-menu-item-text">
+          <span class="mobile-menu-item-title">Descuentos</span>
+          <span class="mobile-menu-item-sub">Cupones y promociones</span>
+        </div>
+        <i class="fa-solid fa-chevron-right mobile-menu-item-arrow"></i>
+      </a>
+      <a class="mobile-menu-item" onclick="openMenuSection('orders')">
+        <div class="mobile-menu-item-icon"><i class="fa-solid fa-receipt"></i></div>
+        <div class="mobile-menu-item-text">
+          <span class="mobile-menu-item-title">Historial</span>
+          <span class="mobile-menu-item-sub">Mis compras anteriores</span>
+        </div>
+        <i class="fa-solid fa-chevron-right mobile-menu-item-arrow"></i>
+      </a>
+      <a class="mobile-menu-item" href="/track.html" onclick="closeMobileMenu()">
+        <div class="mobile-menu-item-icon"><i class="fa-solid fa-location-dot"></i></div>
+        <div class="mobile-menu-item-text">
+          <span class="mobile-menu-item-title">Rastrear</span>
+          <span class="mobile-menu-item-sub">Seguimiento de pedido</span>
+        </div>
+        <i class="fa-solid fa-chevron-right mobile-menu-item-arrow"></i>
+      </a>
+    </nav>
+  </div>
+
+  <script src="/js/app.js?v=1.6"></script>
+</body>
+</html>

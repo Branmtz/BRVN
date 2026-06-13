@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BRVN — Resultado de Compra</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <!-- Header Navigation -->
+  <header>
+    <div class="container nav-container">
+      <a href="/" class="logo brand-logo">
+        <span class="logo-title">BRVN</span>
+        <span class="logo-sub">CALZADO</span>
+      </a>
+      <nav class="nav-links">
+        <a href="/">Inicio</a>
+        <a href="/track.html">Rastrear Pedido</a>
+      </nav>
+      <div class="nav-icons">
+        <a href="/cart.html" class="cart-icon" title="Carrito">
+          <i class="fa-solid fa-bag-shopping"></i>
+          <span id="cart-count">0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <main class="container">
+    <div class="tracking-card" style="text-align: center; max-width: 500px; padding: 48px 32px;">
+      <div id="result-icon" style="font-size: 48px; margin-bottom: 24px;">
+        <i class="fa-solid fa-circle-notch fa-spin" style="color: var(--text-secondary);"></i>
+      </div>
+      
+      <h2 id="result-title" style="font-size: 24px; font-weight: 600; margin-bottom: 12px;">Procesando...</h2>
+      <p id="result-message" style="color: var(--text-secondary); font-size: 14px; margin-bottom: 32px; line-height: 1.6;">
+        Estamos validando los detalles de la transacción de pago con Mercado Pago.
+      </p>
+      
+      <div id="action-area">
+        <a href="/" class="buy-button" style="display: block;">Ir a Catálogo</a>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-content">
+      <div>
+        <p>&copy; 2026 Distributed by BRVN Store. Todos los derechos reservados.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Clear cart
+      localStorage.removeItem('paps_cart');
+      
+      const params = new URLSearchParams(window.location.search);
+      const status = params.get('status');
+      const folio = params.get('folio') || 'pedido';
+      
+      const iconEl = document.getElementById('result-icon');
+      const titleEl = document.getElementById('result-title');
+      const msgEl = document.getElementById('result-message');
+      const actionEl = document.getElementById('action-area');
+      
+      if (status === 'success') {
+        iconEl.innerHTML = '<i class="fa-solid fa-circle-check" style="color: #34c759;"></i>';
+        titleEl.textContent = '¡Gracias por tu compra!';
+        msgEl.innerHTML = `Tu pago ha sido aprobado correctamente por Mercado Pago.<br><br>Conserva tu folio de compra para el rastreo de tu envío:<br><strong style="font-size: 18px; color:#1d1d1f; display:block; margin-top:8px;">${folio}</strong>`;
+        actionEl.innerHTML = `
+          <a href="/track.html?folio=${folio}" class="buy-button" style="display: block; margin-bottom: 12px;">Rastrear mi pedido</a>
+          <a href="/" class="secondary-btn" style="display: block; text-align: center; padding: 12px;">Volver a la tienda</a>
+        `;
+
+        // Verification fallback call to backend
+        const paymentId = params.get('payment_id') || params.get('collection_id');
+        if (paymentId) {
+          fetch('/api/checkout/verify-payment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folio, paymentId })
+          })
+          .then(res => res.json())
+          .then(data => {
+            console.log('[Verify Payment Fallback Response]:', data);
+          })
+          .catch(err => {
+            console.error('[Verify Payment Fallback Error]:', err);
+          });
+        }
+      } else if (status === 'pending') {
+        iconEl.innerHTML = '<i class="fa-solid fa-circle-info" style="color: #ff9500;"></i>';
+        titleEl.textContent = 'Pago Pendiente';
+        msgEl.innerHTML = `El pago del pedido está en proceso de acreditación (si es OXXO, recuerda pagar en sucursal).<br><br>Conserva tu folio de compra:<br><strong style="font-size: 18px; color:#1d1d1f; display:block; margin-top:8px;">${folio}</strong>`;
+        actionEl.innerHTML = `
+          <a href="/track.html?folio=${folio}" class="buy-button" style="display: block; margin-bottom: 12px;">Ver detalles del pedido</a>
+          <a href="/" class="secondary-btn" style="display: block; text-align: center; padding: 12px;">Volver a la tienda</a>
+        `;
+      } else {
+        // Failure or other
+        iconEl.innerHTML = '<i class="fa-solid fa-circle-xmark" style="color: #ff3b30;"></i>';
+        titleEl.textContent = 'Pago Declinado';
+        msgEl.innerHTML = `No pudimos procesar la transacción de pago. Tu pedido sigue guardado como pendiente.<br><br>Folio de referencia: <strong>${folio}</strong>`;
+        actionEl.innerHTML = `
+          <a href="/" class="buy-button" style="display: block;">Intentar de nuevo</a>
+        `;
+      }
+    });
+  </script>
+</body>
+</html>

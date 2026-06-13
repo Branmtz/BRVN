@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAPS — Carrito de Compras</title>
+  <link rel="stylesheet" href="/css/styles.css?v=1.6">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <!-- Header Navigation -->
+  <header>
+    <div class="container nav-container">
+      <a href="/" class="logo brand-logo">
+        <span class="logo-title">BRVN</span>
+        <span class="logo-sub">CALZADO</span>
+      </a>
+      <div class="announcement-banner">
+        <span id="announcement-text">🎁 ¡Regalo en tu Primera Compra, ¡Regístrate ahora! Código: PAPSGIFT</span>
+      </div>
+      <div class="nav-icons">
+        <a href="javascript:void(0)" onclick="switchTab('menu')" title="Mi Cuenta"><i class="fa-regular fa-user"></i></a>
+        <a href="/cart.html" class="cart-icon active" title="Carrito">
+          <i class="fa-solid fa-bag-shopping"></i>
+          <span id="cart-count">0</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Cart Content -->
+  <main class="container">
+    <div class="hero-section" style="padding: 40px 0 20px; text-align: left;">
+      <h1 style="font-size: 36px;">Tu Bolsa.</h1>
+    </div>
+
+    <div class="cart-layout">
+      <!-- Left: Cart items list -->
+      <div class="cart-items-list" id="cart-items-list">
+        <div style="text-align: center; padding: 48px; color: var(--text-secondary);">
+          <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 8px;"></i>
+          <p>Cargando tu bolsa...</p>
+        </div>
+      </div>
+
+      <!-- Right: Checkout summary & form -->
+      <div class="checkout-form-container" id="checkout-box">
+        <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 10px;">Resumen del Pedido</h2>
+        
+        <div class="summary-row">
+          <span>Subtotal</span>
+          <span id="summary-subtotal">$0 MXN</span>
+        </div>
+        <div class="summary-row">
+          <span>Envío</span>
+          <span id="summary-shipping" style="color: var(--text-secondary); font-weight: 500;">Por cotizar</span>
+        </div>
+        
+        <div class="summary-row summary-total">
+          <span>Total</span>
+          <span id="summary-total-value">$0 MXN</span>
+        </div>
+
+        <div class="detail-divider" style="margin: 10px 0 20px;"></div>
+
+        <h3 style="font-size: 14px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 12px;">Detalles de Envío</h3>
+        
+        <!-- Billing/Shipping Form -->
+        <form id="checkout-form">
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="client-name">Nombre Completo</label>
+            <input type="text" id="client-name" required placeholder="Juan Pérez">
+          </div>
+          
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="client-email">Correo Electrónico</label>
+            <input type="email" id="client-email" required placeholder="juan@correo.com">
+          </div>
+          
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="client-phone">Teléfono Móvil (10 dígitos)</label>
+            <input type="tel" id="client-phone" required pattern="[0-9]{10}" placeholder="5545598011">
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label for="client-street">Calle *</label>
+              <input type="text" id="client-street" required placeholder="Ej. Av. Juárez">
+            </div>
+            <div class="form-group">
+              <label for="client-number"># Exterior *</label>
+              <input type="text" id="client-number" required placeholder="Ej. 123 o S/N">
+            </div>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label for="client-neighborhood">Colonia *</label>
+              <input type="text" id="client-neighborhood" required placeholder="Ej. Centro">
+            </div>
+            <div class="form-group">
+              <label for="client-zip">Código Postal *</label>
+              <input type="text" id="client-zip" required pattern="[0-9]{5}" placeholder="Ej. 06000">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="client-city">Municipio / Ciudad *</label>
+              <input type="text" id="client-city" required placeholder="Ej. Cuauhtémoc">
+            </div>
+            <div class="form-group">
+              <label for="client-state">Estado / Provincia *</label>
+              <input type="text" id="client-state" required placeholder="Ej. CDMX">
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="client-company">Compañía (Opcional)</label>
+            <input type="text" id="client-company" placeholder="Ej. Tienda Centro">
+          </div>
+
+          <div class="form-group" style="margin-bottom: 20px;">
+            <label for="client-reference">Referencia de Ubicación *</label>
+            <input type="text" id="client-reference" required placeholder="Ej. Portón gris, frente a parque">
+          </div>
+
+          <div id="shipping-methods-wrapper" style="margin-bottom: 20px; display: none;">
+            <label style="font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 8px; display: block;">Paquetería de Envío *</label>
+            <div id="shipping-rates-list" style="display: flex; flex-direction: column; gap: 8px;">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+          
+          <button type="submit" class="buy-button">
+            <i class="fa-solid fa-lock"></i> Proceder al Pago
+          </button>
+        </form>
+
+        <p style="font-size: 11px; color: var(--text-secondary); text-align: center; margin-top: 12px;">
+          <i class="fa-solid fa-shield-halved"></i> Transacción segura y cifrada procesada por Mercado Pago.
+        </p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-content">
+      <div>
+        <p>&copy; 2026 Distributed by BRVN Store. Todos los derechos reservados.</p>
+      </div>
+      <div class="footer-links">
+        <a href="/track.html">Rastrear Pedido</a>
+        <a href="/admin.html">Administrador</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Mobile Bottom Navigation Bar -->
+  <nav class="bottom-nav">
+    <a class="bottom-nav-item" onclick="switchTab('home')" id="bottom-nav-home">
+      <i class="fa-solid fa-house"></i>
+      <span>Inicio</span>
+    </a>
+    <a class="bottom-nav-item" onclick="switchTab('categories')" id="bottom-nav-categories">
+      <i class="fa-solid fa-layer-group"></i>
+      <span>Categorías</span>
+    </a>
+    <a href="/cart.html" class="bottom-nav-item active" id="bottom-nav-cart">
+      <div class="cart-icon-wrapper">
+        <i class="fa-solid fa-bag-shopping"></i>
+        <span class="cart-badge" id="mobile-cart-badge">0</span>
+      </div>
+      <span>Carrito</span>
+    </a>
+    <a class="bottom-nav-item" onclick="switchTab('trends')" id="bottom-nav-trends">
+      <i class="fa-solid fa-fire"></i>
+      <span>Trends</span>
+    </a>
+    <a class="bottom-nav-item" onclick="switchTab('menu')" id="bottom-nav-menu">
+      <i class="fa-solid fa-bars"></i>
+      <span>Menú</span>
+    </a>
+  </nav>
+
+  <script src="/js/app.js?v=1.5"></script>
+</body>
+</html>
