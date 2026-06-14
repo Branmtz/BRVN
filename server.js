@@ -917,7 +917,10 @@ async function initNodemailer() {
       auth: {
         user: user,
         pass: pass
-      }
+      },
+      connectionTimeout: 10000, // 10 seconds timeout
+      greetingTimeout: 10000,
+      socketTimeout: 15000
     });
     console.log(`[Email] Nodemailer configured using SMTP: ${host}`);
   } else {
