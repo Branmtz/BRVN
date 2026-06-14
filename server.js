@@ -1001,9 +1001,15 @@ app.post('/api/auth/register', async (req, res) => {
   }
   
   try {
-    const existing = await dbQuery.get("SELECT id FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
+    const existing = await dbQuery.get("SELECT id, verified FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
     if (existing) {
-      return res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
+      if (existing.verified === 1) {
+        return res.status(400).json({ error: 'El correo electrónico ya está registrado.' });
+      } else {
+        // Delete the unverified user and their codes to allow them to register again and receive a new code
+        await dbQuery.run("DELETE FROM verification_codes WHERE user_id = ?", [existing.id]);
+        await dbQuery.run("DELETE FROM users WHERE id = ?", [existing.id]);
+      }
     }
     
     const passwordHash = await bcrypt.hash(password, 12);
