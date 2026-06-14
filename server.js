@@ -1024,7 +1024,7 @@ app.post('/api/auth/register', async (req, res) => {
     
     if (mailTransporter) {
       const mailOptions = {
-        from: '"B R V N" <noreply@brvn-store.com>',
+        from: '"B R V N" <noreply@brvn.com.mx>',
         to: email.trim().toLowerCase(),
         subject: 'Código de verificación - B R V N',
         html: `
@@ -1151,7 +1151,7 @@ app.post('/api/auth/resend-code', async (req, res) => {
     
     if (mailTransporter) {
       const mailOptions = {
-        from: '"B R V N" <noreply@brvn-store.com>',
+        from: '"B R V N" <noreply@brvn.com.mx>',
         to: email.trim().toLowerCase(),
         subject: 'Nuevo código de verificación - B R V N',
         html: `
@@ -1200,8 +1200,12 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       const resetToken = jwt.sign({ resetUserId: user.id, email: user.email }, CUSTOMER_JWT_SECRET, { expiresIn: '15m' });
       
       if (mailTransporter) {
+        const host = req.get('host');
+        const protocol = req.protocol;
+        const baseUrl = `${protocol}://${host}`;
+        
         const mailOptions = {
-          from: '"B R V N" <noreply@brvn-store.com>',
+          from: '"B R V N" <noreply@brvn.com.mx>',
           to: email.trim().toLowerCase(),
           subject: 'Restablecer contraseña - B R V N',
           html: `
@@ -1209,7 +1213,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
               <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
               <p style="color: #666; font-size: 16px; line-height: 1.5;">Recibimos una solicitud para restablecer tu contraseña. Haz clic en el siguiente enlace para crear una nueva contraseña:</p>
               <div style="text-align: center; margin: 30px 0;">
-                <a href="http://localhost:3000/reset-password.html?token=${resetToken}" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; display: inline-block;">Restablecer Contraseña</a>
+                <a href="${baseUrl}/reset-password.html?token=${resetToken}" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; display: inline-block;">Restablecer Contraseña</a>
               </div>
               <p style="color: #999; font-size: 12px; text-align: center; margin-top: 15px;">Este enlace es válido por 15 minutos.</p>
             </div>
@@ -1223,7 +1227,10 @@ app.post('/api/auth/forgot-password', async (req, res) => {
           console.log(`[Email] Reset Link Preview URL: ${previewUrl}`);
         }
       } else {
-        console.warn(`[Email Warning] Transporter not ready. Reset link for ${email} is: http://localhost:3000/reset-password.html?token=${resetToken}`);
+        const host = req.get('host');
+        const protocol = req.protocol;
+        const baseUrl = `${protocol}://${host}`;
+        console.warn(`[Email Warning] Transporter not ready. Reset link for ${email} is: ${baseUrl}/reset-password.html?token=${resetToken}`);
       }
     }
   } catch (err) {
