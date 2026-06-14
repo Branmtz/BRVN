@@ -125,6 +125,8 @@ header {
   display: block;
   line-height: 1;
   transition: var(--transition-smooth);
+  
+
 }
 
 .nav-links {

@@ -439,7 +439,7 @@ app.get('/api/products/:id', optionalAuthenticateCustomer, async (req, res) => {
       isFavorite = !!fav;
     }
     
-    const parsedSizes = JSON.parse(product.sizes || '[]');
+    const parsedSizes = Array.from(new Set(JSON.parse(product.sizes || '[]')));
     const sortedSizes = parsedSizes.sort((a, b) => {
       const numA = parseFloat(a);
       const numB = parseFloat(b);
@@ -498,7 +498,7 @@ app.get('/api/products/:id/sync', optionalAuthenticateCustomer, async (req, res)
     }
     
     // Fallback: return current database stock/sizes
-    const parsedSizes = JSON.parse(product.sizes || '[]');
+    const parsedSizes = Array.from(new Set(JSON.parse(product.sizes || '[]')));
     const sortedSizes = parsedSizes.sort((a, b) => {
       const numA = parseFloat(a);
       const numB = parseFloat(b);

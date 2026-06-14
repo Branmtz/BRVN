@@ -173,20 +173,23 @@ async function getEcatepecSizes(browser, originalUrl, fallbackSizes) {
   }
 
   if (ecatepecSizes.length > 0) {
-    console.log(`[Scraper] Ecatepec In-Stock sizes: ${ecatepecSizes.join(', ')} (Total stock: ${totalStock})`);
+    const uniqueSizes = Array.from(new Set(ecatepecSizes));
+    const finalTotalStock = uniqueSizes.reduce((sum, size) => sum + (sizesStockMap[size] || 0), 0);
+    console.log(`[Scraper] Ecatepec In-Stock sizes: ${uniqueSizes.join(', ')} (Total stock: ${finalTotalStock})`);
     return {
-      sizes: ecatepecSizes,
-      stock: totalStock,
+      sizes: uniqueSizes,
+      stock: finalTotalStock,
       sizesStock: sizesStockMap,
       isBestseller: isBestseller
     };
   }
   
+  const uniqueFallback = Array.from(new Set(fallbackSizes));
   console.log(`[Scraper] No Ecatepec sizes found with stock > 0. Falling back to all catalog sizes.`);
   return {
-    sizes: fallbackSizes,
+    sizes: uniqueFallback,
     stock: 0,
-    sizesStock: fallbackSizes.reduce((acc, s) => ({ ...acc, [s]: 99 }), {}),
+    sizesStock: uniqueFallback.reduce((acc, s) => ({ ...acc, [s]: 99 }), {}),
     isBestseller: isBestseller
   };
 }
@@ -298,7 +301,7 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
           // price_member   = precio de socio/costo (ej. $549) — se usa como nuestro costo en BRVN
           // price_customer = precio público del catálogo (ej. $749) — fallback si no está el de socio
           const supplierPrice = source.price_member || source.price_customer || 0;
-          const fallbackSizes = Array.isArray(source.sizes) ? source.sizes.map(s => s.toString()) : [];
+          const fallbackSizes = Array.isArray(source.sizes) ? Array.from(new Set(source.sizes.map(s => s.toString()))) : [];
           const images = Array.isArray(source.images) 
             ? source.images.map(img => `https://res.cloudinary.com/priceshoes/image/upload/${img.startsWith('/') ? img.slice(1) : img}`)
             : [];
@@ -595,7 +598,8 @@ async function syncSingleProductLive(product) {
     // 1. Parse current sizes to pass as fallback sizes
     let fallbackSizes = [];
     try {
-      fallbackSizes = typeof product.sizes === 'string' ? JSON.parse(product.sizes) : (product.sizes || []);
+      const parsed = typeof product.sizes === 'string' ? JSON.parse(product.sizes) : (product.sizes || []);
+      fallbackSizes = Array.from(new Set(parsed));
     } catch (e) {
       fallbackSizes = [];
     }

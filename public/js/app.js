@@ -605,8 +605,10 @@ function renderProductDetail() {
   
   if (sizeSelector) {
     if (p.sizes && p.sizes.length > 0) {
+      // Deduplicate sizes to avoid duplicate selection pills
+      const uniqueSizes = Array.from(new Set(p.sizes));
       // Sort sizes from smallest to largest (ascending)
-      const sortedSizes = [...p.sizes].sort((a, b) => {
+      const sortedSizes = uniqueSizes.sort((a, b) => {
         const numA = parseFloat(a);
         const numB = parseFloat(b);
         if (isNaN(numA) && isNaN(numB)) {

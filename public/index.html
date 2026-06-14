@@ -6,13 +6,19 @@
   <title>BRVN — Tienda Oficial</title>
   <link rel="stylesheet" href="/css/styles.css?v=1.6">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    // Prevent splash screen flash for returning visitors
+    if (sessionStorage.getItem('brvn_entered')) {
+      document.documentElement.classList.add('splash-entered');
+    }
+  </script>
 </head>
 <body>
 
   <!-- ══════════════════════════════════════════
        SPLASH SCREEN — First-visit landing page
        ══════════════════════════════════════════ -->
-  <div id="splash-screen" onclick="enterStore(event)">
+  <div id="splash-screen" onclick="enterStore(event)" onkeydown="handleSplashKeyDown(event)" tabindex="0" role="button" aria-label="Explorar Colección de BRVN Calzado">
     <div class="splash-content">
       <div class="brand-logo splash-logo">
         <span class="logo-title">BRVN</span>
@@ -57,6 +63,9 @@
       visibility: hidden;
       pointer-events: none;
     }
+    .splash-entered #splash-screen {
+      display: none !important;
+    }
 
     /* Center container */
     .splash-content {
@@ -65,7 +74,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 60px 100px;
+      padding: 60px clamp(20px, 10vw, 100px);
       transform: translateY(-20px);
     }
 
@@ -132,6 +141,13 @@
       sessionStorage.setItem('brvn_entered', '1');
       const splash = document.getElementById('splash-screen');
       splash.classList.add('hidden');
+    }
+
+    function handleSplashKeyDown(event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        enterStore(event);
+      }
     }
   </script>
 
