@@ -189,11 +189,55 @@
          HOME VIEW (Catalog & Filtering)
          ══════════════════════════════════════════ -->
     <div id="home-view" class="view-section active">
-      <!-- Hero Section -->
-      <section class="hero-section" style="padding-top: 40px;">
-        <h1>Menos ruido. Más estilo.</h1>
-        <p>Tu clóset ya los está esperando. Solo haz clic y recíbelos en casa.</p>
+      <!-- Advertising Carousel Section -->
+      <section class="hero-carousel-container" style="margin-top: 24px;">
+        <div class="carousel-track-wrapper">
+          <div class="carousel-track" id="hero-carousel-track">
+            
+            <!-- Slide 1: Menos ruido. Más estilo. -->
+            <div class="carousel-slide active">
+              <div class="slide-content">
+                <span class="slide-tag">NUEVA COLECCIÓN</span>
+                <h2>Menos ruido. Más estilo.</h2>
+                <p>Tu clóset ya los está esperando. Solo haz clic y recíbelos en casa.</p>
+                <a href="#catalog-start" class="slide-btn">Explorar Calzado</a>
+              </div>
+            </div>
+            
+            <!-- Slide 2: Oferta Especial -->
+            <div class="carousel-slide mexico-slide">
+              <div class="slide-content">
+                <span class="slide-tag">OFERTA ESPECIAL</span>
+                <h2>¡Descuento en tu Primera Compra!</h2>
+                <p>Usa el código <strong style="font-weight: 700;">VIVAMEXICO</strong> al hacer tu compra y obtén un regalo.</p>
+                <a href="#catalog-start" class="slide-btn">Ver Catálogo</a>
+              </div>
+            </div>
+
+            
+            <!-- Slide 4: Envíos Express -->
+            <div class="carousel-slide">
+              <div class="slide-content">
+                <span class="slide-tag">ENVÍOS EXPRESS</span>
+                <h2>Envíos a Todo México</h2>
+                <p>Recibe tu calzado favorito de forma rápida y segura en la puerta de tu hogar.</p>
+                <a href="#catalog-start" class="slide-btn">Explorar Calzado</a>
+              </div>
+            </div>
+            
+          </div>
+        </div>
+        
+        <!-- Navigation Arrows -->
+        <button class="carousel-arrow prev" onclick="moveCarousel(-1)">&lsaquo;</button>
+        <button class="carousel-arrow next" onclick="moveCarousel(1)">&rsaquo;</button>
+        
+        <!-- Navigation Dots -->
+        <div class="carousel-dots" id="carousel-dots-container"></div>
       </section>
+
+      <!-- Anchor for scrolling down -->
+      <div id="catalog-start"></div>
 
       <div class="filters-bar">
         <!-- Search Box -->

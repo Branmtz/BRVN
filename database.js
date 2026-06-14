@@ -1,52 +1,81 @@
-const sqlite3 = require('sqlite3').verbose();
+const { createClient } = require('@libsql/client');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 const dbPath = path.resolve(__dirname, 'paps_store.db');
+const dbUrl = process.env.DATABASE_URL || `file:${dbPath}`;
+const authToken = process.env.DATABASE_AUTH_TOKEN || '';
 
-// Connect to SQLite Database
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error connecting to SQLite database:', err.message);
-  } else {
-    console.log('Connected to SQLite database at:', dbPath);
-    initializeDatabase();
-  }
+console.log('Initializing database client...');
+console.log('Database URL:', dbUrl.startsWith('file:') ? dbUrl : dbUrl.split('@')[dbUrl.split('@').length - 1]);
+
+const client = createClient({
+  url: dbUrl,
+  authToken: authToken
 });
 
-// Wrap DB methods in Promises for clean async/await code
+// Polyfill dbQuery to match sqlite3 helper behavior
 const dbQuery = {
-  run(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      db.run(sql, params, function (err) {
-        if (err) reject(err);
-        else resolve({ lastID: this.lastID, changes: this.changes });
-      });
-    });
+  async run(sql, params = []) {
+    try {
+      const result = await client.execute({ sql, args: params });
+      return {
+        lastID: result.lastInsertRowid !== undefined ? Number(result.lastInsertRowid) : undefined,
+        changes: result.rowsAffected
+      };
+    } catch (err) {
+      throw err;
+    }
   },
-  get(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      db.get(sql, params, (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+  async get(sql, params = []) {
+    try {
+      const result = await client.execute({ sql, args: params });
+      return result.rows[0]; // will be undefined if no rows
+    } catch (err) {
+      throw err;
+    }
   },
-  all(sql, params = []) {
-    return new Promise((resolve, reject) => {
-      db.all(sql, params, (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    });
+  async all(sql, params = []) {
+    try {
+      const result = await client.execute({ sql, args: params });
+      return result.rows;
+    } catch (err) {
+      throw err;
+    }
   }
 };
 
+// Polyfill db object to prevent crashes if external modules call db.run/get/all/close
+const db = {
+  run(sql, params, cb) {
+    dbQuery.run(sql, params).then(res => cb && cb(null, res)).catch(err => cb && cb(err));
+  },
+  get(sql, params, cb) {
+    dbQuery.get(sql, params).then(res => cb && cb(null, res)).catch(err => cb && cb(err));
+  },
+  all(sql, params, cb) {
+    dbQuery.all(sql, params).then(res => cb && cb(null, res)).catch(err => cb && cb(err));
+  },
+  close(callback) {
+    if (callback) callback();
+  }
+};
+
+// Initialize connection and tables
+initializeDatabase();
+
 async function initializeDatabase() {
   try {
-    // Enable WAL mode for better write performance
-    db.run('PRAGMA journal_mode = WAL');
+    // Enable WAL mode and busy timeout for better write performance and concurrency (local files only)
+    if (dbUrl.startsWith('file:')) {
+      try {
+        await dbQuery.run('PRAGMA journal_mode = WAL');
+        await dbQuery.run('PRAGMA busy_timeout = 10000');
+      } catch (err) {
+        console.warn('Could not configure SQLite PRAGMAs:', err.message);
+      }
+    }
 
     // 1. Create Products Table
     await dbQuery.run(`
@@ -67,7 +96,9 @@ async function initializeDatabase() {
         status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
         category TEXT DEFAULT 'General',
         brand TEXT DEFAULT NULL,
-        specifications TEXT DEFAULT NULL
+        specifications TEXT DEFAULT NULL,
+        sizes_stock TEXT DEFAULT NULL,
+        is_bestseller INTEGER DEFAULT 0
       )
     `);
     console.log('Products table verified/created.');
@@ -92,6 +123,22 @@ async function initializeDatabase() {
     try {
       await dbQuery.run("ALTER TABLE products ADD COLUMN specifications TEXT DEFAULT NULL");
       console.log('Migrated: specifications column added to products.');
+    } catch (e) {
+      // column likely already exists
+    }
+
+    // Migration for products table: add sizes_stock if not present
+    try {
+      await dbQuery.run("ALTER TABLE products ADD COLUMN sizes_stock TEXT DEFAULT NULL");
+      console.log('Migrated: sizes_stock column added to products.');
+    } catch (e) {
+      // column likely already exists
+    }
+
+    // Migration for products table: add is_bestseller if not present
+    try {
+      await dbQuery.run("ALTER TABLE products ADD COLUMN is_bestseller INTEGER DEFAULT 0");
+      console.log('Migrated: is_bestseller column added to products.');
     } catch (e) {
       // column likely already exists
     }

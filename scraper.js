@@ -1,6 +1,49 @@
 const { chromium } = require('playwright');
 const { dbQuery } = require('./database');
 
+// Persistent browser manager to avoid launching Chromium on every request
+let persistentBrowser = null;
+let persistentBrowserPromise = null;
+
+async function getBrowserInstance() {
+  try {
+    if (persistentBrowser) {
+      if (persistentBrowser.isConnected()) {
+        return persistentBrowser;
+      } else {
+        console.log('[Browser Manager] Persistent browser disconnected. Cleaning up...');
+        try { await persistentBrowser.close(); } catch (e) {}
+        persistentBrowser = null;
+        persistentBrowserPromise = null;
+      }
+    }
+
+    if (!persistentBrowserPromise) {
+      console.log('[Browser Manager] Launching persistent Chromium instance...');
+      persistentBrowserPromise = chromium.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      }).then(browser => {
+        persistentBrowser = browser;
+        browser.on('disconnected', () => {
+          console.log('[Browser Manager] Browser disconnected.');
+          persistentBrowser = null;
+          persistentBrowserPromise = null;
+        });
+        return browser;
+      }).catch(err => {
+        persistentBrowserPromise = null;
+        throw err;
+      });
+    }
+    return await persistentBrowserPromise;
+  } catch (err) {
+    console.error('[Browser Manager] Failed to launch Chromium:', err.message);
+    throw err;
+  }
+}
+
+
 /**
  * Normalizes gender value from the department or gender fields
  */
@@ -25,6 +68,127 @@ function normalizeColor(colorStr) {
   if (!colorStr) return 'Único';
   const parts = colorStr.split('|');
   return parts[0].trim();
+}
+
+/**
+ * Visits a product page and extracts the sizes and total stock available specifically in the "Ecatepec" store.
+ * Returns only the sizes that are actually in stock (> 0 pairs) at the Ecatepec store.
+ */
+async function getEcatepecSizes(browser, originalUrl, fallbackSizes) {
+  console.log(`[Scraper] Checking Ecatepec store stock for: ${originalUrl}`);
+  
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  });
+  const page = await context.newPage();
+  
+  const ecatepecSizes = [];
+  const processedSizes = new Set();
+  const sizesStockMap = {};
+  let totalStock = 0;
+  let isBestseller = 0;
+  
+  // Set up response listener to intercept inventories responses
+  page.on('response', async (response) => {
+    const url = response.url();
+    if (url.includes('nearby-stores/inventories/')) {
+      try {
+        const text = await response.text();
+        const json = JSON.parse(text);
+        const sizeLabel = json.size_label;
+        const inventories = json.store_inventories || [];
+        const ecatepecInfo = inventories.find(store => store.store_name === 'Ecatepec');
+        
+        if (ecatepecInfo) {
+          const qty = parseInt(ecatepecInfo.quantity) || 0;
+          sizesStockMap[sizeLabel.toString().trim()] = qty;
+          if (qty > 0) {
+            ecatepecSizes.push(sizeLabel.toString().trim());
+            totalStock += qty;
+          }
+        }
+        processedSizes.add(sizeLabel.toString().trim());
+      } catch (e) {
+        // ignore JSON parsing or other errors
+      }
+    }
+  });
+
+  try {
+    // Block images, stylesheets, fonts, media, and third-party trackers to make load ultra fast
+    await page.route('**/*', (route) => {
+      const url = route.request().url();
+      const type = route.request().resourceType();
+      
+      const isTrackerOrUnneeded = 
+        url.includes('google-analytics') || 
+        url.includes('analytics') || 
+        url.includes('gtm.js') || 
+        url.includes('facebook') || 
+        url.includes('pixel') || 
+        url.includes('hotjar') || 
+        url.includes('doubleclick') || 
+        url.includes('ads') || 
+        url.includes('sentry') || 
+        url.includes('clarity.ms') ||
+        url.includes('datadog');
+
+      if (['image', 'stylesheet', 'font', 'media'].includes(type) || isTrackerOrUnneeded) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    
+    // Check if the page contains a "MÁS VENDIDO" text banner
+    const bestsellerCount = await page.locator('text=/(MÁS|MAS)\\s+VENDIDO/i').count();
+    if (bestsellerCount > 0) {
+      isBestseller = 1;
+    }
+
+    // Click "Ver disponibilidad en tiendas"
+    const storeBtn = page.locator('text=/Ver disponibilidad en tiendas/i');
+    // Wait for the button to appear in the DOM
+    await storeBtn.first().waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
+    
+    if (await storeBtn.count() > 0) {
+      await storeBtn.first().dispatchEvent('click');
+      
+      // Wait for responses (up to 4.5 seconds or until we processed all fallback sizes)
+      const startTime = Date.now();
+      const expectedCount = fallbackSizes.length;
+      while (processedSizes.size < expectedCount && Date.now() - startTime < 4500) {
+        await page.waitForTimeout(150);
+      }
+    }
+  } catch (err) {
+    console.warn(`[Scraper] Failed to check Ecatepec stock for ${originalUrl}:`, err.message);
+  } finally {
+    try {
+      await page.close();
+      await context.close();
+    } catch (e) {}
+  }
+
+  if (ecatepecSizes.length > 0) {
+    console.log(`[Scraper] Ecatepec In-Stock sizes: ${ecatepecSizes.join(', ')} (Total stock: ${totalStock})`);
+    return {
+      sizes: ecatepecSizes,
+      stock: totalStock,
+      sizesStock: sizesStockMap,
+      isBestseller: isBestseller
+    };
+  }
+  
+  console.log(`[Scraper] No Ecatepec sizes found with stock > 0. Falling back to all catalog sizes.`);
+  return {
+    sizes: fallbackSizes,
+    stock: 0,
+    sizesStock: fallbackSizes.reduce((acc, s) => ({ ...acc, [s]: 99 }), {}),
+    isBestseller: isBestseller
+  };
 }
 
 /**
@@ -134,7 +298,7 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
           // price_member   = precio de socio/costo (ej. $549) — se usa como nuestro costo en BRVN
           // price_customer = precio público del catálogo (ej. $749) — fallback si no está el de socio
           const supplierPrice = source.price_member || source.price_customer || 0;
-          const sizes = Array.isArray(source.sizes) ? source.sizes.map(s => s.toString()) : [];
+          const fallbackSizes = Array.isArray(source.sizes) ? source.sizes.map(s => s.toString()) : [];
           const images = Array.isArray(source.images) 
             ? source.images.map(img => `https://res.cloudinary.com/priceshoes/image/upload/${img.startsWith('/') ? img.slice(1) : img}`)
             : [];
@@ -145,6 +309,17 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             ? `https://www.priceshoes.com/productos/${source.url_key}`
             : `https://www.priceshoes.com/productos/${sku}`;
           
+          // Query the Ecatepec store stock dynamically for this product
+          console.log(`[Scraper] Querying Ecatepec store stock for product: ${title} (${sku})`);
+          const ecatepecData = await getEcatepecSizes(browser, originalUrl, fallbackSizes);
+          const sizes = ecatepecData.sizes;
+          const stock = ecatepecData.stock;
+          const sizesStock = ecatepecData.sizesStock;
+          
+          // Detect bestseller status from API labels/flags OR page text
+          const isBestsellerFromApi = (source.bestseller === true || (Array.isArray(source.labels) && source.labels.includes('MÁS VENDIDO'))) ? 1 : 0;
+          const isBestseller = (isBestsellerFromApi || ecatepecData.isBestseller) ? 1 : 0;
+
           const Marca = source.brand || null;
           const Modelo = source.model || null;
           const Material = source.material || null;
@@ -162,15 +337,17 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             supplier_price: supplierPrice,
             images: JSON.stringify(images),
             sizes: JSON.stringify(sizes),
+            sizes_stock: JSON.stringify(sizesStock),
             color: color,
             gender: gender,
             origin: 'priceshoes',
             original_url: originalUrl,
-            stock: 99,
+            stock: stock,
             status: 'active',
             category: category,
             brand: source.brand || 'Otros',
-            specifications: specifications
+            specifications: specifications,
+            is_bestseller: isBestseller
           });
         }
       }
@@ -189,27 +366,27 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             // Update product data but PRESERVE existing category to prevent cross-category corruption
             await dbQuery.run(`
               UPDATE products SET
-                title=?, description=?, supplier_price=?, images=?, sizes=?,
+                title=?, description=?, supplier_price=?, images=?, sizes=?, sizes_stock=?,
                 color=?, gender=?, original_url=?, stock=?, status=?, brand=?,
-                specifications=?
+                specifications=?, is_bestseller=?
               WHERE sku=?
             `, [
-              item.title, item.description, item.supplier_price, item.images, item.sizes,
+              item.title, item.description, item.supplier_price, item.images, item.sizes, item.sizes_stock,
               item.color, item.gender, item.original_url, item.stock, item.status, item.brand,
-              item.specifications, item.sku
+              item.specifications, item.is_bestseller, item.sku
             ]);
             // Don't count updates toward the limit — only new products count
           } else {
             // Brand new product — insert with the assigned category
             await dbQuery.run(`
               INSERT INTO products (
-                id, sku, title, description, price, supplier_price, images, sizes, color, gender, origin, original_url, stock, status, category, brand, specifications
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, sku, title, description, price, supplier_price, images, sizes, sizes_stock, color, gender, origin, original_url, stock, status, category, brand, specifications, is_bestseller
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
               item.id, item.sku, item.title, item.description, null,
-              item.supplier_price, item.images, item.sizes, item.color, item.gender,
+              item.supplier_price, item.images, item.sizes, item.sizes_stock, item.color, item.gender,
               item.origin, item.original_url, item.stock, item.status, item.category, item.brand,
-              item.specifications
+              item.specifications, item.is_bestseller
             ]);
             totalSaved++;
             savedOnThisPage++;
@@ -289,53 +466,181 @@ function findSizesInJSON(obj) {
 
 /**
  * Performs a live stock verification for a single product directly on Price Shoes
+ * checks specifically for the quantity available in the "Ecatepec" store.
  */
 async function verifyLiveStock(originalUrl, size) {
-  console.log(`[Live Stock Check] Verifying size "${size}" on: ${originalUrl}`);
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-  });
-  const page = await context.newPage();
-  
+  console.log(`[Live Stock Check] Verifying size "${size}" on: ${originalUrl} for store "Ecatepec"`);
+  let browser;
+  let context;
+  let page;
   let inStock = false;
   
   try {
-    // Block images, stylesheets, fonts, and media to make load ultra fast
+    browser = await getBrowserInstance();
+    context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    });
+    page = await context.newPage();
+    
+    let targetStoreStock = null;
+    const targetSizeStr = size.toString().trim();
+    
+    // Set up response listener to find Ecatepec stock
+    page.on('response', async (response) => {
+      const url = response.url();
+      if (url.includes('nearby-stores/inventories/')) {
+        try {
+          const text = await response.text();
+          const json = JSON.parse(text);
+          const sizeLabel = (json.size_label || '').toString().trim();
+          
+          const responseSizeFloat = parseFloat(sizeLabel);
+          const targetSizeFloat = parseFloat(targetSizeStr);
+          
+          if (!isNaN(responseSizeFloat) && !isNaN(targetSizeFloat) && responseSizeFloat === targetSizeFloat) {
+            const inventories = json.store_inventories || [];
+            const ecatepecInfo = inventories.find(store => store.store_name === 'Ecatepec');
+            if (ecatepecInfo) {
+              targetStoreStock = parseInt(ecatepecInfo.quantity) || 0;
+              console.log(`[Live Stock Check] Intercepted size ${sizeLabel} for Ecatepec: stock = ${targetStoreStock}`);
+            }
+          }
+        } catch (e) {
+          // ignore json errors
+        }
+      }
+    });
+
+    // Block images, stylesheets, fonts, media, and third-party trackers to make load ultra fast
     await page.route('**/*', (route) => {
+      const url = route.request().url();
       const type = route.request().resourceType();
-      if (['image', 'stylesheet', 'font', 'media'].includes(type)) {
+      
+      const isTrackerOrUnneeded = 
+        url.includes('google-analytics') || 
+        url.includes('analytics') || 
+        url.includes('gtm.js') || 
+        url.includes('facebook') || 
+        url.includes('pixel') || 
+        url.includes('hotjar') || 
+        url.includes('doubleclick') || 
+        url.includes('ads') || 
+        url.includes('sentry') || 
+        url.includes('clarity.ms') ||
+        url.includes('datadog');
+
+      if (['image', 'stylesheet', 'font', 'media'].includes(type) || isTrackerOrUnneeded) {
         route.abort();
       } else {
         route.continue();
       }
     });
     
-    await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
     
-    // Extract Next.js data
-    const nextDataText = await page.locator('script#__NEXT_DATA__').innerText();
-    const nextData = JSON.parse(nextDataText);
+    const storeBtn = page.locator('text=/Ver disponibilidad en tiendas/i');
+    // Wait for the button to appear in the DOM
+    await storeBtn.first().waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
     
-    const sizes = findSizesInJSON(nextData);
-    console.log(`[Live Stock Check] Sizes available on Price Shoes:`, sizes);
+    if (await storeBtn.count() > 0) {
+      await storeBtn.first().dispatchEvent('click');
+      
+      // Wait for responses (max 6 seconds)
+      const startTime = Date.now();
+      while (targetStoreStock === null && Date.now() - startTime < 6000) {
+        await page.waitForTimeout(150);
+      }
+    }
     
-    if (sizes && sizes.length > 0) {
-      const targetSize = size.toString().trim();
-      inStock = sizes.map(s => s.toString().trim()).includes(targetSize);
+    if (targetStoreStock !== null) {
+      inStock = targetStoreStock > 0;
+      console.log(`[Live Stock Check] Results for Ecatepec: stock = ${targetStoreStock}, inStock = ${inStock}`);
+    } else {
+      // Fallback: check __NEXT_DATA__
+      console.warn('[Live Stock Check] Intercept failed. Falling back to general ecommerce sizes.');
+      const nextDataText = await page.locator('script#__NEXT_DATA__').innerText();
+      const nextData = JSON.parse(nextDataText);
+      const sizes = findSizesInJSON(nextData);
+      if (sizes && sizes.length > 0) {
+        inStock = sizes.map(s => parseFloat(s)).includes(parseFloat(targetSizeStr));
+      }
     }
   } catch (err) {
-    console.error('[Live Stock Check] Error parsing details:', err.message);
-    // If check fails (e.g. timeout), default to true to allow sale, but log it
+    console.error('[Live Stock Check] Error or Playwright launch failed. Defaulting to inStock = true:', err.message);
+    // If check fails (e.g. timeout or Playwright missing in serverless), default to true to allow sale, but log it
     inStock = true;
   } finally {
-    await browser.close();
+    if (page) {
+      try { await page.close(); } catch (e) {}
+    }
+    if (context) {
+      try { await context.close(); } catch (e) {}
+    }
   }
   
   return inStock;
 }
 
+/**
+ * Performs a live scraper update for a single product.
+ * Fetches sizes, sizes_stock, and total stock for the Ecatepec store on Price Shoes.
+ * Updates the database and returns the fresh details.
+ */
+async function syncSingleProductLive(product) {
+  if (!product || product.origin !== 'priceshoes') return null;
+
+  console.log(`[On-Demand Sync] Triggering live Ecatepec stock sync for SKU: ${product.sku} (${product.id})...`);
+  let browser;
+  try {
+    // 1. Parse current sizes to pass as fallback sizes
+    let fallbackSizes = [];
+    try {
+      fallbackSizes = typeof product.sizes === 'string' ? JSON.parse(product.sizes) : (product.sizes || []);
+    } catch (e) {
+      fallbackSizes = [];
+    }
+
+    // 2. Get browser singleton
+    browser = await getBrowserInstance();
+
+    // 3. Get Ecatepec Sizes
+    const ecatepecData = await getEcatepecSizes(browser, product.original_url, fallbackSizes);
+    
+    const sizes = ecatepecData.sizes;
+    const stock = ecatepecData.stock;
+    const sizesStock = ecatepecData.sizesStock;
+
+    // 4. Update the DB
+    await dbQuery.run(`
+      UPDATE products SET
+        sizes = ?,
+        sizes_stock = ?,
+        stock = ?
+      WHERE id = ?
+    `, [
+      JSON.stringify(sizes),
+      JSON.stringify(sizesStock),
+      stock,
+      product.id
+    ]);
+
+    console.log(`[On-Demand Sync] Live sync successful for SKU: ${product.sku}. Stock: ${stock}.`);
+    return {
+      sizes,
+      stock,
+      sizes_stock: sizesStock
+    };
+  } catch (err) {
+    console.error(`[On-Demand Sync] Failed live sync for product ID ${product.id}:`, err.message);
+    return null;
+  } finally {
+    // Persistent browser is kept open for subsequent requests.
+  }
+}
+
 module.exports = {
   runScraper,
-  verifyLiveStock
+  verifyLiveStock,
+  syncSingleProductLive
 };
+

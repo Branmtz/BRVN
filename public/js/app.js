@@ -15,7 +15,12 @@ let scrollObserver = null;
 // Product detail page state
 let selectedSize = null;
 let currentProduct = null;
+let currentImageIdx = 0;
 let selectedShippingRate = null;
+
+// Hero Carousel State
+let currentCarouselSlideIdx = 0;
+let carouselTimer = null;
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', () => {
@@ -108,35 +113,41 @@ function renderStarIcons(average) {
 /* --- Catalog Page Logic --- */
 async function initCatalogPage() {
   const gridEl = document.getElementById('product-grid');
+  
+  // 1. Process URL params immediately to toggle active UI tab
+  const params = new URLSearchParams(window.location.search);
+  const tabParam = params.get('tab');
+  const genderParam = params.get('gender');
+  if (genderParam) {
+    currentGenderFilter = genderParam;
+  }
+  
+  const genderSelect = document.getElementById('gender-select');
+  if (genderSelect) {
+    genderSelect.value = currentGenderFilter;
+  }
+  
+  if (tabParam && tabParam !== 'home') {
+    switchTab(tabParam);
+  }
+  
   try {
+    // 2. Fetch catalog products
     const res = await fetchWithAuth('/api/products');
     if (!res.ok) throw new Error('Failed to fetch catalog');
     allProducts = await res.json();
     
-    // Check URL parameters for gender or tab
-    const params = new URLSearchParams(window.location.search);
-    const genderParam = params.get('gender');
-    if (genderParam) {
-      currentGenderFilter = genderParam;
-    }
-    
-    const genderSelect = document.getElementById('gender-select');
-    if (genderSelect) {
-      genderSelect.value = currentGenderFilter;
-    }
-    
-    // Switch tabs dynamically if tab query param exists
-    const tabParam = params.get('tab');
-    if (tabParam) {
-      switchTab(tabParam);
-    } else {
+    // 3. Render catalog only if we are currently on the 'home' tab
+    if (!tabParam || tabParam === 'home') {
       filterByGender(currentGenderFilter);
     }
     
     await loadBrandFilters();
+    initHeroCarousel();
   } catch (err) {
     console.error(err);
-    if (gridEl) {
+    // Only show error on catalog grid if the user is actually on 'home' tab
+    if (gridEl && (!tabParam || tabParam === 'home')) {
       gridEl.innerHTML = `
         <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: #ff3b30;">
           <i class="fa-solid fa-circle-exclamation" style="font-size: 24px; margin-bottom: 12px;"></i>
@@ -187,13 +198,18 @@ function buildProductCard(p, imgClass = '') {
   const heartIcon = p.isFavorite ? 'fa-solid' : 'fa-regular';
   
   return `
-    <article class="product-card">
+    <article class="product-card" onclick="window.location.href='/product.html?id=${p.id}'">
       <button class="favorite-btn ${heartActive}" onclick="toggleFavorite(event, '${p.id}')" title="Guardar en favoritos">
         <i class="${heartIcon} fa-heart"></i>
       </button>
       <span class="origin-tag ${p.origin}">
         ${p.origin === 'PAPS' ? 'PAPS' : 'Importado'}
       </span>
+      ${(p.is_bestseller === 1 || p.is_bestseller === true || p.is_bestseller === '1') ? `
+      <span class="bestseller-tag">
+        <i class="fa-solid fa-fire"></i> Más Vendido
+      </span>
+      ` : ''}
       <div class="product-image-container ${imgClass}">
         <img src="${mainImg}" alt="${p.title}" loading="lazy">
       </div>
@@ -454,6 +470,11 @@ async function initProductDetailPage() {
     if (!res.ok) throw new Error('Product not found');
     currentProduct = await res.json();
     renderProductDetail();
+    
+    // Trigger non-blocking live stock sync in the background
+    if (currentProduct && currentProduct.origin === 'priceshoes') {
+      triggerBackgroundStockSync(currentProduct.id);
+    }
   } catch (err) {
     console.error(err);
     document.getElementById('detail-page-content').innerHTML = `
@@ -519,16 +540,47 @@ function renderProductDetail() {
     ${specsHtml}
   `;
   
-  // Render Main Image with Favorite Button overlay
+  // Render Main Image with Favorite Button overlay and Navigation Arrows
+  currentImageIdx = 0; // reset index on product render
   const mainImgUrl = p.images && p.images.length > 0 ? p.images[0] : '/placeholder.jpg';
   if (mainImageContainer) {
     mainImageContainer.style.position = 'relative';
     const heartActive = p.isFavorite ? 'active' : '';
     const heartIcon = p.isFavorite ? 'fa-solid' : 'fa-regular';
+    
+    // Check if we need navigation arrows (more than 1 image)
+    const hasMultipleImages = p.images && p.images.length > 1;
+    const arrowStyles = `
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background-color: rgba(255, 255, 255, 0.9);
+      border: 1px solid var(--border-color, #e5e5e5);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      display: ${hasMultipleImages ? 'flex' : 'none'};
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+      color: var(--text-primary, #1d1d1f);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      z-index: 10;
+    `;
+    
     mainImageContainer.innerHTML = `
       <img src="${mainImgUrl}" id="expanded-image" alt="${p.title}">
       <button class="favorite-btn ${heartActive}" onclick="toggleFavorite(event, '${p.id}')" style="top: 24px; right: 24px;" title="Guardar en favoritos">
         <i class="${heartIcon} fa-heart"></i>
+      </button>
+      
+      <!-- Navigation Arrows -->
+      <button id="prev-image-btn" onclick="prevProductImage()" style="${arrowStyles} left: 16px;" class="image-nav-arrow" title="Imagen anterior">
+        <i class="fa-solid fa-chevron-left"></i>
+      </button>
+      <button id="next-image-btn" onclick="nextProductImage()" style="${arrowStyles} right: 16px;" class="image-nav-arrow" title="Siguiente imagen">
+        <i class="fa-solid fa-chevron-right"></i>
       </button>
     `;
   }
@@ -546,11 +598,34 @@ function renderProductDetail() {
   
   // Render Sizes Selector
   const sizeSelector = document.getElementById('size-selector');
+  const stockIndicator = document.getElementById('size-stock-indicator');
+  if (stockIndicator) {
+    stockIndicator.innerHTML = '';
+  }
+  
   if (sizeSelector) {
     if (p.sizes && p.sizes.length > 0) {
-      sizeSelector.innerHTML = p.sizes.map(size => `
+      // Sort sizes from smallest to largest (ascending)
+      const sortedSizes = [...p.sizes].sort((a, b) => {
+        const numA = parseFloat(a);
+        const numB = parseFloat(b);
+        if (isNaN(numA) && isNaN(numB)) {
+          return a.toString().localeCompare(b.toString());
+        }
+        if (isNaN(numA)) return 1;
+        if (isNaN(numB)) return -1;
+        return numA - numB;
+      });
+
+      sizeSelector.innerHTML = sortedSizes.map(size => `
         <button class="size-pill" onclick="selectSize(this, '${size}')">${size}</button>
       `).join('');
+      
+      // Auto-select the first size pill to show the stock validation immediately on load
+      const firstPill = sizeSelector.querySelector('.size-pill');
+      if (firstPill) {
+        firstPill.click();
+      }
     } else {
       sizeSelector.innerHTML = '<p style="color: #ff3b30;">Agotado temporalmente en todas las tallas.</p>';
       const buyBtn = document.getElementById('buy-btn');
@@ -562,15 +637,84 @@ function renderProductDetail() {
 window.switchImage = function(cardEl, imgUrl) {
   document.getElementById('expanded-image').src = imgUrl;
   const cards = document.querySelectorAll('.thumbnail-card');
-  cards.forEach(c => c.classList.remove('active'));
-  cardEl.classList.add('active');
+  cards.forEach((c, idx) => {
+    c.classList.remove('active');
+    if (c === cardEl) {
+      currentImageIdx = idx;
+      c.classList.add('active');
+    }
+  });
 };
+
+window.prevProductImage = function() {
+  if (!currentProduct || !currentProduct.images || currentProduct.images.length <= 1) return;
+  currentImageIdx = (currentImageIdx - 1 + currentProduct.images.length) % currentProduct.images.length;
+  updateProductImageFromIndex();
+};
+
+window.nextProductImage = function() {
+  if (!currentProduct || !currentProduct.images || currentProduct.images.length <= 1) return;
+  currentImageIdx = (currentImageIdx + 1) % currentProduct.images.length;
+  updateProductImageFromIndex();
+};
+
+function updateProductImageFromIndex() {
+  const imgUrl = currentProduct.images[currentImageIdx];
+  const expandedImg = document.getElementById('expanded-image');
+  if (expandedImg) {
+    expandedImg.src = imgUrl;
+  }
+  
+  // Update thumbnail active states
+  const cards = document.querySelectorAll('.thumbnail-card');
+  cards.forEach((c, idx) => {
+    if (idx === currentImageIdx) {
+      c.classList.add('active');
+      c.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    } else {
+      c.classList.remove('active');
+    }
+  });
+}
 
 window.selectSize = function(pillEl, size) {
   selectedSize = size;
   const pills = document.querySelectorAll('.size-pill');
   pills.forEach(p => p.classList.remove('active'));
   pillEl.classList.add('active');
+  
+  // Update stock indicator below size buttons
+  const stockIndicator = document.getElementById('size-stock-indicator');
+  if (stockIndicator && currentProduct) {
+    const stockMap = currentProduct.sizes_stock || {};
+    let qty = 99; // Default fallback for local products without scraper metadata
+    
+    // Attempt to match size keys (handling potential floats like "23.0" or "23")
+    const sizeStr = size.toString().trim();
+    if (stockMap && typeof stockMap === 'object') {
+      if (sizeStr in stockMap) {
+        qty = parseInt(stockMap[sizeStr]) || 0;
+      } else if (`${sizeStr}.0` in stockMap) {
+        qty = parseInt(stockMap[`${sizeStr}.0`]) || 0;
+      } else {
+        const floatKey = parseFloat(sizeStr);
+        for (const k in stockMap) {
+          if (parseFloat(k) === floatKey) {
+            qty = parseInt(stockMap[k]) || 0;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (qty >= 5) {
+      stockIndicator.style.color = '#34c759'; // Green
+      stockIndicator.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${qty} pares disponibles`;
+    } else {
+      stockIndicator.style.color = '#ff3b30'; // Red
+      stockIndicator.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${qty} pares disponibles <span style="font-weight: 600; color: #ff3b30; display: block; margin-top: 4px; font-size: 13px;">⚠️ Requiere verificación de stock</span>`;
+    }
+  }
 };
 
 // Add to Cart
@@ -609,6 +753,90 @@ window.addToCart = function() {
   // Redirect to shopping cart
   window.location.href = '/cart.html';
 };
+
+function triggerBackgroundStockSync(productId) {
+  // Show a small verification loader in the stock indicator area
+  const stockIndicator = document.getElementById('size-stock-indicator');
+  if (stockIndicator) {
+    stockIndicator.style.color = 'var(--text-secondary)';
+    stockIndicator.innerHTML = `
+      <div style="margin-top: 10px; max-width: 280px; font-family: inherit;">
+        <div style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
+          <i class="fa-solid fa-circle-notch fa-spin" style="color: #ff9500;"></i> Verificando stock físico en tiempo real
+        </div>
+        <div style="width: 100%; height: 4px; background: #e5e5ea; border-radius: 2px; overflow: hidden; position: relative;">
+          <div style="position: absolute; width: 35%; height: 100%; background: linear-gradient(90deg, #ff9500, #ff3b30); border-radius: 2px; animation: shimmerBar 1.4s infinite ease-in-out;"></div>
+        </div>
+        <style>
+          @keyframes shimmerBar {
+            0% { left: -35%; }
+            50% { left: 50%; }
+            100% { left: 100%; }
+          }
+        </style>
+      </div>
+    `;
+  }
+  
+  fetchWithAuth(`/api/products/${productId}/sync`)
+    .then(res => {
+      if (!res.ok) throw new Error('Sync failed');
+      return res.json();
+    })
+    .then(data => {
+      if (currentProduct && currentProduct.id === productId) {
+        // Update product data
+        currentProduct.sizes = data.sizes;
+        currentProduct.sizes_stock = data.sizes_stock;
+        currentProduct.stock = data.stock;
+        
+        // Re-render size pills with new sorted sizes
+        const prevSelectedSize = selectedSize;
+        renderProductDetail();
+        
+        // Keep previous selection active, or fallback to first pill
+        if (prevSelectedSize) {
+          const sizeSelector = document.getElementById('size-selector');
+          if (sizeSelector) {
+            const pills = sizeSelector.querySelectorAll('.size-pill');
+            let matched = false;
+            for (const pill of pills) {
+              if (pill.textContent.trim() === prevSelectedSize.toString().trim()) {
+                pill.click();
+                matched = true;
+                break;
+              }
+            }
+            // If previous selected size is no longer available in the new sync
+            if (!matched && pills.length > 0) {
+              pills[0].click();
+            }
+          }
+        }
+      }
+    })
+    .catch(err => {
+      console.error('[Background Sync Error]:', err);
+      // Restore cached state display if there was a selection
+      if (selectedSize) {
+        const sizeSelector = document.getElementById('size-selector');
+        if (sizeSelector) {
+          const pills = sizeSelector.querySelectorAll('.size-pill');
+          for (const pill of pills) {
+            if (pill.classList.contains('active')) {
+              selectSize(pill, selectedSize);
+              break;
+            }
+          }
+        }
+      } else {
+        const stockIndicator = document.getElementById('size-stock-indicator');
+        if (stockIndicator) {
+          stockIndicator.innerHTML = '';
+        }
+      }
+    });
+}
 
 /* --- Favorites Toggle Logic --- */
 window.toggleFavorite = async function(event, productId) {
@@ -1742,3 +1970,127 @@ window.resetShippingChoice = function() {
     totalEl.textContent = `$${subtotal.toLocaleString()} MXN`;
   }
 };
+
+// Hero Carousel Logic
+function initHeroCarousel() {
+  const container = document.querySelector('.hero-carousel-container');
+  const track = document.getElementById('hero-carousel-track');
+  if (!container || !track) return;
+
+  const slides = track.querySelectorAll('.carousel-slide');
+  if (slides.length === 0) return;
+
+  currentCarouselSlideIdx = 0;
+  
+  // Create dots dynamically
+  const dotsContainer = document.getElementById('carousel-dots-container');
+  if (dotsContainer) {
+    dotsContainer.innerHTML = '';
+    slides.forEach((_, idx) => {
+      const dot = document.createElement('div');
+      dot.className = `carousel-dot${idx === 0 ? ' active' : ''}`;
+      dot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        goToCarouselSlide(idx);
+      });
+      dotsContainer.appendChild(dot);
+    });
+  }
+
+  // Bind arrows if present
+  const prevArrow = container.querySelector('.carousel-arrow.prev');
+  const nextArrow = container.querySelector('.carousel-arrow.next');
+  
+  if (prevArrow) {
+    prevArrow.onclick = (e) => {
+      e.stopPropagation();
+      moveCarousel(-1);
+    };
+  }
+  if (nextArrow) {
+    nextArrow.onclick = (e) => {
+      e.stopPropagation();
+      moveCarousel(1);
+    };
+  }
+
+  // Smooth scroll for catalog buttons
+  const slideBtns = container.querySelectorAll('.slide-btn');
+  slideBtns.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const targetId = btn.getAttribute('href');
+      if (targetId && targetId.startsWith('#')) {
+        e.preventDefault();
+        e.stopPropagation();
+        const targetEl = document.querySelector(targetId);
+        if (targetEl) {
+          targetEl.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+    });
+  });
+
+  // Start auto-slide timer
+  startCarouselTimer();
+
+  // Pause on hover
+  container.addEventListener('mouseenter', stopCarouselTimer);
+  container.addEventListener('mouseleave', startCarouselTimer);
+}
+
+function startCarouselTimer() {
+  stopCarouselTimer();
+  carouselTimer = setInterval(() => {
+    moveCarousel(1);
+  }, 6000); // auto-slide every 6 seconds
+}
+
+function stopCarouselTimer() {
+  if (carouselTimer) {
+    clearInterval(carouselTimer);
+    carouselTimer = null;
+  }
+}
+
+function goToCarouselSlide(index) {
+  const track = document.getElementById('hero-carousel-track');
+  if (!track) return;
+  const slides = track.querySelectorAll('.carousel-slide');
+  const dots = document.querySelectorAll('.carousel-dot');
+  
+  if (slides.length === 0) return;
+
+  // Handle bounds
+  if (index >= slides.length) {
+    currentCarouselSlideIdx = 0;
+  } else if (index < 0) {
+    currentCarouselSlideIdx = slides.length - 1;
+  } else {
+    currentCarouselSlideIdx = index;
+  }
+
+  // Update active slide
+  slides.forEach((slide, idx) => {
+    if (idx === currentCarouselSlideIdx) {
+      slide.classList.add('active');
+    } else {
+      slide.classList.remove('active');
+    }
+  });
+
+  // Update active dot
+  dots.forEach((dot, idx) => {
+    if (idx === currentCarouselSlideIdx) {
+      dot.classList.add('active');
+    } else {
+      dot.classList.remove('active');
+    }
+  });
+}
+
+function moveCarousel(direction) {
+  goToCarouselSlide(currentCarouselSlideIdx + direction);
+}
+
+// Make moveCarousel global so the inline HTML onclick works
+window.moveCarousel = moveCarousel;

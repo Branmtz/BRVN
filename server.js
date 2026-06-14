@@ -3,7 +3,7 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { dbQuery } = require('./database');
-const { runScraper, verifyLiveStock } = require('./scraper');
+const { runScraper, verifyLiveStock, syncSingleProductLive } = require('./scraper');
 require('dotenv').config();
 
 const app = express();
@@ -329,7 +329,100 @@ app.get('/api/brands', async (req, res) => {
   }
 });
 
-// GET Single product detail
+// GET Trends (Best Sellers)
+app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) => {
+  try {
+    const orders = await dbQuery.all("SELECT items FROM orders WHERE status IN ('paid', 'purchased_on_supplier', 'shipped')");
+    
+    const salesMap = {};
+    const productIdsWithSales = new Set();
+    orders.forEach(order => {
+      try {
+        const items = JSON.parse(order.items || '[]');
+        items.forEach(item => {
+          const pid = item.id;
+          if (pid) {
+            salesMap[pid] = (salesMap[pid] || 0) + (item.qty || 1);
+            productIdsWithSales.add(pid);
+          }
+        });
+      } catch (e) {
+        // ignore
+      }
+    });
+    
+    // Query only bestsellers or products with sales
+    let products;
+    const salesIds = Array.from(productIdsWithSales);
+    
+    if (salesIds.length > 0) {
+      const placeholders = salesIds.map(() => '?').join(',');
+      const sql = `SELECT * FROM products WHERE status = 'active' AND (is_bestseller = 1 OR id IN (${placeholders}))`;
+      products = await dbQuery.all(sql, salesIds);
+    } else {
+      products = await dbQuery.all("SELECT * FROM products WHERE status = 'active' AND is_bestseller = 1");
+    }
+
+    // Fallback if no bestsellers and no sales yet (e.g. fresh installation)
+    if (products.length === 0) {
+      products = await dbQuery.all("SELECT * FROM products WHERE status = 'active' LIMIT 12");
+    }
+    
+    // Fetch average ratings
+    const ratingsData = await dbQuery.all("SELECT product_id, AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings GROUP BY product_id");
+    const ratingsMap = {};
+    ratingsData.forEach(r => {
+      ratingsMap[r.product_id] = {
+        average: r.avgRating ? parseFloat(r.avgRating.toFixed(1)) : 0,
+        count: r.countRating || 0
+      };
+    });
+
+    const customerId = req.customer ? req.customer.id : null;
+    const favoriteIds = new Set();
+    if (customerId) {
+      const favs = await dbQuery.all("SELECT product_id FROM favorites WHERE customer_id = ?", [customerId]);
+      favs.forEach(f => favoriteIds.add(f.product_id));
+    }
+
+    const mappedProducts = products.map(p => {
+      const currentPrice = calculatePrice(p.supplier_price);
+      return {
+        ...p,
+        price: currentPrice,
+        images: JSON.parse(p.images || '[]'),
+        sizes: JSON.parse(p.sizes || '[]'),
+        isFavorite: customerId ? favoriteIds.has(p.id) : false,
+        rating: ratingsMap[p.id] || { average: 0, count: 0 },
+        salesCount: salesMap[p.id] || 0
+      };
+    });
+    
+    // Filter to only include products that are marked as bestseller or have sales
+    let trendsList = mappedProducts.filter(p => p.is_bestseller === 1 || p.salesCount > 0);
+    if (trendsList.length === 0) {
+      // Fallback: if no bestsellers or sales yet, show top products by default (up to 12)
+      trendsList = mappedProducts.slice(0, 12);
+    } else {
+      // Sort by bestseller status desc, then by salesCount desc
+      trendsList.sort((a, b) => {
+        const bestA = a.is_bestseller || 0;
+        const bestB = b.is_bestseller || 0;
+        if (bestB !== bestA) {
+          return bestB - bestA;
+        }
+        return b.salesCount - a.salesCount;
+      });
+    }
+    
+    res.json(trendsList);
+  } catch (err) {
+    console.error('Trends error:', err);
+    res.status(500).json({ error: 'Error al obtener tendencias.' });
+  }
+});
+
+// GET Single product detail (Non-blocking: returns cached db values instantly)
 app.get('/api/products/:id', optionalAuthenticateCustomer, async (req, res) => {
   try {
     const product = await dbQuery.get("SELECT * FROM products WHERE id = ?", [req.params.id]);
@@ -346,11 +439,22 @@ app.get('/api/products/:id', optionalAuthenticateCustomer, async (req, res) => {
       isFavorite = !!fav;
     }
     
+    const parsedSizes = JSON.parse(product.sizes || '[]');
+    const sortedSizes = parsedSizes.sort((a, b) => {
+      const numA = parseFloat(a);
+      const numB = parseFloat(b);
+      if (isNaN(numA) && isNaN(numB)) return a.toString().localeCompare(b.toString());
+      if (isNaN(numA)) return 1;
+      if (isNaN(numB)) return -1;
+      return numA - numB;
+    });
+
     res.json({
       ...product,
       price: calculatePrice(product.supplier_price),
       images: JSON.parse(product.images || '[]'),
-      sizes: JSON.parse(product.sizes || '[]'),
+      sizes: sortedSizes,
+      sizes_stock: JSON.parse(product.sizes_stock || '{}'),
       isFavorite,
       rating: {
         average: ratingResult.avgRating ? parseFloat(ratingResult.avgRating.toFixed(1)) : 0,
@@ -359,6 +463,59 @@ app.get('/api/products/:id', optionalAuthenticateCustomer, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Error al obtener los detalles del producto.' });
+  }
+});
+
+// GET Live sync product stock on demand (called in background after page load)
+app.get('/api/products/:id/sync', optionalAuthenticateCustomer, async (req, res) => {
+  try {
+    const product = await dbQuery.get("SELECT * FROM products WHERE id = ?", [req.params.id]);
+    if (!product) return res.status(404).json({ error: 'Producto no encontrado.' });
+    
+    if (product.origin === 'priceshoes') {
+      try {
+        const liveData = await syncSingleProductLive(product);
+        if (liveData) {
+          const sortedSizes = liveData.sizes.sort((a, b) => {
+            const numA = parseFloat(a);
+            const numB = parseFloat(b);
+            if (isNaN(numA) && isNaN(numB)) return a.toString().localeCompare(b.toString());
+            if (isNaN(numA)) return 1;
+            if (isNaN(numB)) return -1;
+            return numA - numB;
+          });
+
+          return res.json({
+            success: true,
+            stock: liveData.stock,
+            sizes: sortedSizes,
+            sizes_stock: liveData.sizes_stock
+          });
+        }
+      } catch (syncErr) {
+        console.error(`[Single Product Sync API] Failed live sync for product ID ${product.id}:`, syncErr.message);
+      }
+    }
+    
+    // Fallback: return current database stock/sizes
+    const parsedSizes = JSON.parse(product.sizes || '[]');
+    const sortedSizes = parsedSizes.sort((a, b) => {
+      const numA = parseFloat(a);
+      const numB = parseFloat(b);
+      if (isNaN(numA) && isNaN(numB)) return a.toString().localeCompare(b.toString());
+      if (isNaN(numA)) return 1;
+      if (isNaN(numB)) return -1;
+      return numA - numB;
+    });
+
+    res.json({
+      success: false,
+      stock: product.stock,
+      sizes: sortedSizes,
+      sizes_stock: JSON.parse(product.sizes_stock || '{}')
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al sincronizar el producto.' });
   }
 });
 
@@ -1377,67 +1534,7 @@ app.post('/api/customer/orders/:orderId/rate', authenticateCustomer, async (req,
   }
 });
 
-// GET Trends (Best Sellers)
-app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) => {
-  try {
-    const orders = await dbQuery.all("SELECT items FROM orders WHERE status IN ('paid', 'purchased_on_supplier', 'shipped')");
-    
-    const salesMap = {};
-    orders.forEach(order => {
-      try {
-        const items = JSON.parse(order.items || '[]');
-        items.forEach(item => {
-          const pid = item.id;
-          if (pid) {
-            salesMap[pid] = (salesMap[pid] || 0) + (item.qty || 1);
-          }
-        });
-      } catch (e) {
-        // ignore
-      }
-    });
-    
-    const products = await dbQuery.all("SELECT * FROM products WHERE status = 'active'");
-    
-    // Fetch average ratings
-    const ratingsData = await dbQuery.all("SELECT product_id, AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings GROUP BY product_id");
-    const ratingsMap = {};
-    ratingsData.forEach(r => {
-      ratingsMap[r.product_id] = {
-        average: r.avgRating ? parseFloat(r.avgRating.toFixed(1)) : 0,
-        count: r.countRating || 0
-      };
-    });
 
-    const customerId = req.customer ? req.customer.id : null;
-    const favoriteIds = new Set();
-    if (customerId) {
-      const favs = await dbQuery.all("SELECT product_id FROM favorites WHERE customer_id = ?", [customerId]);
-      favs.forEach(f => favoriteIds.add(f.product_id));
-    }
-
-    const mappedProducts = products.map(p => {
-      const currentPrice = calculatePrice(p.supplier_price);
-      return {
-        ...p,
-        price: currentPrice,
-        images: JSON.parse(p.images || '[]'),
-        sizes: JSON.parse(p.sizes || '[]'),
-        isFavorite: customerId ? favoriteIds.has(p.id) : false,
-        rating: ratingsMap[p.id] || { average: 0, count: 0 },
-        salesCount: salesMap[p.id] || 0
-      };
-    });
-    
-    // Sort by salesCount desc, then fall back to normal order
-    mappedProducts.sort((a, b) => b.salesCount - a.salesCount);
-    
-    res.json(mappedProducts);
-  } catch (err) {
-    console.error('Trends error:', err);
-    res.status(500).json({ error: 'Error al obtener tendencias.' });
-  }
-});
 
 
 /* --- ADMIN APIS (JWT Protected) --- */
@@ -1828,6 +1925,47 @@ app.delete('/api/admin/categories/:categoryName', authenticateAdmin, async (req,
   }
 });
 
+// GET Preview purge count by keyword (Admin only)
+app.get('/api/admin/products/purge/preview', authenticateAdmin, async (req, res) => {
+  const { query } = req.query;
+  if (!query || !query.trim()) {
+    return res.status(400).json({ error: 'La palabra clave de búsqueda es requerida.' });
+  }
+
+  const keyword = `%${query.trim().toLowerCase()}%`;
+  try {
+    const result = await dbQuery.get(
+      "SELECT COUNT(*) as count FROM products WHERE LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(category) LIKE ? OR LOWER(sku) LIKE ? OR LOWER(brand) LIKE ?",
+      [keyword, keyword, keyword, keyword, keyword]
+    );
+    res.json({ count: result.count || 0 });
+  } catch (err) {
+    console.error('Error previewing product purge:', err);
+    res.status(500).json({ error: 'Error al obtener la vista previa de la purga.' });
+  }
+});
+
+// POST Purge products by keyword (Admin only)
+app.post('/api/admin/products/purge', authenticateAdmin, async (req, res) => {
+  const { query } = req.body;
+  if (!query || !query.trim()) {
+    return res.status(400).json({ error: 'La palabra clave es requerida.' });
+  }
+
+  const keyword = `%${query.trim().toLowerCase()}%`;
+  try {
+    const result = await dbQuery.run(
+      "DELETE FROM products WHERE LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(category) LIKE ? OR LOWER(sku) LIKE ? OR LOWER(brand) LIKE ?",
+      [keyword, keyword, keyword, keyword, keyword]
+    );
+    console.log(`[Admin Purge] Deleted ${result.changes} products matching keyword "${query.trim()}".`);
+    res.json({ success: true, deletedCount: result.changes });
+  } catch (err) {
+    console.error('Error executing product purge:', err);
+    res.status(500).json({ error: 'Error al eliminar los productos coincidentes.' });
+  }
+});
+
 // Function to run the hourly sync of all catalog sources
 async function runHourlySync() {
   console.log('\n=== Hourly Background Sync Started ===');
@@ -1849,15 +1987,18 @@ async function runHourlySync() {
   console.log('=== Hourly Background Sync Completed ===\n');
 }
 
-// Schedule hourly sync
-setInterval(runHourlySync, 3600000); // 1 hour in ms
+// Schedule hourly sync only if not running on Vercel
+if (!process.env.VERCEL) {
+  setInterval(runHourlySync, 3600000); // 1 hour in ms
 
-// Also run once on startup after 5 seconds to verify it works and sync initial data
-setTimeout(runHourlySync, 5000);
+  // Also run once on startup after 5 seconds to verify it works and sync initial data
+  setTimeout(runHourlySync, 5000);
 
+  // Start server
+  app.listen(PORT, () => {
+    console.log(`PAPS store server running securely at http://localhost:${PORT}`);
+  });
+}
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`PAPS store server running securely at http://localhost:${PORT}`);
-});
-// Server reload trigger 2
+// Export the Express app for Vercel Serverless Functions
+module.exports = app;

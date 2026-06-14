@@ -911,3 +911,100 @@ window.goToTrackingTab = function(orderId) {
     }, 150);
   }
 };
+
+// Preview purge by keyword
+window.previewPurgeProducts = async function() {
+  const keywordInput = document.getElementById('purge-keyword-input');
+  const previewBox = document.getElementById('purge-preview-box');
+  if (!keywordInput || !previewBox) return;
+
+  const query = keywordInput.value.trim();
+  if (!query) {
+    alert('Por favor ingresa una palabra clave para buscar.');
+    return;
+  }
+
+  const token = localStorage.getItem('paps_token');
+  try {
+    previewBox.style.display = 'block';
+    previewBox.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Buscando coincidencias...`;
+
+    const res = await fetch(`/api/admin/products/purge/preview?query=${encodeURIComponent(query)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.error || 'Failed to fetch preview');
+    }
+
+    const data = await res.json();
+    previewBox.innerHTML = `
+      <div style="font-weight: 600; color: var(--text-primary);">Resultados de búsqueda:</div>
+      <p style="margin-top: 4px; color: var(--text-secondary);">
+        Se encontraron <strong>${data.count}</strong> productos que coinciden con la palabra clave <strong>"${query}"</strong> (en título, descripción, categoría, marca o SKU).
+      </p>
+    `;
+  } catch (err) {
+    console.error('Error previewing purge:', err);
+    previewBox.innerHTML = `<span style="color: #ff3b30;"><i class="fa-solid fa-triangle-exclamation"></i> Error al realizar la búsqueda: ${err.message}</span>`;
+  }
+};
+
+// Execute purge by keyword
+window.executePurgeProducts = async function() {
+  const keywordInput = document.getElementById('purge-keyword-input');
+  const previewBox = document.getElementById('purge-preview-box');
+  if (!keywordInput) return;
+
+  const query = keywordInput.value.trim();
+  if (!query) {
+    alert('Por favor ingresa una palabra clave para eliminar.');
+    return;
+  }
+
+  const confirmationMsg = `⚠️ ¡ATENCIÓN! ⚠️\n\n¿Estás completamente seguro de que deseas eliminar de forma permanente TODOS los productos que contengan la palabra clave "${query}"?\n\nEsta acción eliminará los productos de la base de datos y no se puede deshacer.`;
+  if (!confirm(confirmationMsg)) return;
+
+  const token = localStorage.getItem('paps_token');
+  try {
+    if (previewBox) {
+      previewBox.style.display = 'block';
+      previewBox.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Eliminando productos...`;
+    }
+
+    const res = await fetch('/api/admin/products/purge', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ query })
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.error || 'Failed to execute purge');
+    }
+
+    const data = await res.json();
+    alert(`✅ Purgado de catálogo exitoso:\n\n• Se eliminaron ${data.deletedCount} productos que contenían la palabra clave "${query}".`);
+    
+    if (previewBox) {
+      previewBox.style.display = 'none';
+      previewBox.innerHTML = '';
+    }
+    keywordInput.value = '';
+    
+    // Refresh categories count
+    if (typeof loadCategories === 'function') {
+      loadCategories();
+    }
+  } catch (err) {
+    console.error('Error executing purge:', err);
+    alert(`❌ Error al eliminar productos: ${err.message}`);
+    if (previewBox) {
+      previewBox.innerHTML = `<span style="color: #ff3b30;"><i class="fa-solid fa-triangle-exclamation"></i> Error al eliminar: ${err.message}</span>`;
+    }
+  }
+};

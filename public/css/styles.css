@@ -1651,9 +1651,7 @@ footer {
   }
 
   .view-btn {
-    padding: 6px 10px;
-    font-size: 11px;
-    border-radius: 6px;
+    display: none !important;
   }
 
   /* Show Bottom Navigation on mobile */
@@ -1890,4 +1888,277 @@ footer {
   color: #ff3b30;
   border-color: rgba(255, 59, 48, 0.3);
   background-color: #fff8f8;
+}
+
+/* Image Navigation Arrows */
+.image-nav-arrow {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.image-nav-arrow:hover {
+  background-color: var(--text-primary, #1d1d1f) !important;
+  color: #ffffff !important;
+  border-color: var(--text-primary, #1d1d1f) !important;
+  transform: translateY(-50%) scale(1.08) !important;
+}
+
+.image-nav-arrow:active {
+  transform: translateY(-50%) scale(0.95) !important;
+}
+
+/* Make product cards clickable indicators */
+.product-card {
+  cursor: pointer;
+}
+
+/* Bestseller Badge styling */
+.bestseller-tag {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  z-index: 50;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background-color: #ff9500;
+  color: #fff;
+  border: 1px solid #ff9500;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+/* ==========================================
+   ADVERTISING CAROUSEL STYLES
+   ========================================== */
+.hero-carousel-container {
+  position: relative;
+  width: 100%;
+  height: 380px;
+  border-radius: 16px;
+  overflow: hidden;
+  margin: 16px 0 32px 0;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
+}
+
+.carousel-track-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.carousel-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.carousel-slide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.8s ease, visibility 0.8s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px;
+  background-color: #ffffff;
+  color: var(--text-primary);
+}
+
+.carousel-slide.active {
+  opacity: 1;
+  visibility: visible;
+  z-index: 1;
+}
+
+.slide-content {
+  max-width: 700px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.slide-tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  padding: 4px 12px;
+  border-radius: 20px;
+  display: inline-block;
+}
+
+.carousel-slide h2 {
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  line-height: 1.2;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.carousel-slide p {
+  font-size: 16px;
+  color: var(--text-secondary);
+  font-weight: 300;
+  max-width: 550px;
+  margin: 0 auto;
+  line-height: 1.4;
+}
+
+.slide-btn {
+  background-color: #000000;
+  color: #ffffff;
+  padding: 12px 28px;
+  border-radius: 30px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: var(--transition-smooth);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  display: inline-block;
+  border: 1px solid #000000;
+}
+
+.slide-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  background-color: #333333;
+  color: #ffffff;
+}
+
+.slide-btn:active {
+  transform: translateY(0);
+}
+
+.carousel-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color);
+  color: #000000;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: var(--transition-smooth);
+  line-height: 1;
+}
+
+.carousel-arrow:hover {
+  background-color: #000000;
+  color: #ffffff;
+}
+
+.carousel-arrow.prev {
+  left: 24px;
+}
+
+.carousel-arrow.next {
+  right: 24px;
+}
+
+.carousel-dots {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 10;
+}
+
+.carousel-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.carousel-dot.active {
+  width: 24px;
+  border-radius: 4px;
+  background-color: #000000;
+}
+
+/* Mobile responsive fixes */
+@media (max-width: 768px) {
+  .hero-carousel-container {
+    height: 280px;
+    border-radius: 12px;
+    margin: 12px 0 24px 0;
+  }
+
+  .carousel-slide {
+    padding: 24px;
+  }
+
+  .carousel-slide h2 {
+    font-size: 24px;
+    letter-spacing: -0.5px;
+  }
+
+  .carousel-slide p {
+    font-size: 13px;
+  }
+
+  .slide-btn {
+    padding: 10px 20px;
+    font-size: 13px;
+  }
+
+  .carousel-arrow {
+    display: none !important;
+  }
+
+  /* Stacking tags on mobile product cards */
+  .bestseller-tag {
+    top: 30px !important;
+    left: 8px !important;
+  }
+  
+  /* Mobile UX: Reduce height of product gallery to prevent excessive scrolling */
+  .main-image-view {
+    height: 320px !important;
+  }
+
+  .thumbnails-grid {
+    gap: 8px !important;
+  }
+
+  .thumbnail-card {
+    height: 60px !important;
+    padding: 4px !important;
+  }
+}
+
+/* Slide 2: Mexico theme with white background and Mexican colors */
+.carousel-slide.mexico-slide {
+  background-image: url('/mexico_white_banner_bg.png');
+  background-size: cover;
+  background-position: center;
 }
