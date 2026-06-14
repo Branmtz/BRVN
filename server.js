@@ -1964,8 +1964,8 @@ app.get('/api/admin/products/purge/preview', authenticateAdmin, async (req, res)
 // POST Purge products by keyword (Admin only)
 app.post('/api/admin/products/purge', authenticateAdmin, async (req, res) => {
   const { query } = req.body;
-  if (!query || !query.trim()) {
-    return res.status(400).json({ error: 'La palabra clave es requerida.' });
+  if (!query || query.trim().length < 3) {
+    return res.status(400).json({ error: 'La palabra clave de purga debe tener al menos 3 caracteres.' });
   }
 
   const keyword = `%${query.trim().toLowerCase()}%`;
@@ -1979,6 +1979,54 @@ app.post('/api/admin/products/purge', authenticateAdmin, async (req, res) => {
   } catch (err) {
     console.error('Error executing product purge:', err);
     res.status(500).json({ error: 'Error al eliminar los productos coincidentes.' });
+  }
+});
+
+// GET Debug SMTP Connection and Email Sending
+app.get('/api/debug/test-email', async (req, res) => {
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  
+  if (!host || !user || !pass) {
+    return res.json({ 
+      error: 'Missing SMTP credentials on the server.',
+      SMTP_HOST: host || 'MISSING',
+      SMTP_USER: user || 'MISSING',
+      SMTP_PASS: pass ? 'CONFIGURED (NOT EMPTY)' : 'MISSING'
+    });
+  }
+  
+  try {
+    if (!mailTransporter) {
+      return res.status(500).json({ error: 'mailTransporter is not initialized.' });
+    }
+    
+    console.log('[Debug Email] Verifying transporter...');
+    await mailTransporter.verify();
+    
+    console.log('[Debug Email] Sending test email...');
+    const info = await mailTransporter.sendMail({
+      from: '"B R V N" <noreply@brvn.com.mx>',
+      to: 'mrtinezbrandon@gmail.com',
+      subject: 'Debug Email - B R V N',
+      text: 'This is a test debug email from production.'
+    });
+    
+    res.json({
+      success: true,
+      message: 'SMTP connection and email sending were successful!',
+      messageId: info.messageId
+    });
+  } catch (err) {
+    console.error('[Debug Email Error]:', err);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+      stack: err.stack,
+      code: err.code,
+      command: err.command
+    });
   }
 });
 
