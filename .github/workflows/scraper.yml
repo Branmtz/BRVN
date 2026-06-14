@@ -2,8 +2,8 @@ name: Price Shoes Catalog Scraper Sync
 
 on:
   schedule:
-    # Runs every hour
-    - cron: '0 * * * *'
+    # Runs every 4 hours (saves GitHub Actions minutes)
+    - cron: '0 */4 * * *'
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
@@ -22,6 +22,19 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Get Playwright version
+        id: playwright-version
+        run: echo "PLAYWRIGHT_VERSION=$(node -p "require('./package.json').dependencies.playwright")" >> $GITHUB_ENV
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ env.PLAYWRIGHT_VERSION }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
 
       - name: Install Playwright Chromium Browser
         run: npx playwright install --with-deps chromium
