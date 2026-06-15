@@ -2,8 +2,8 @@ name: Price Shoes Catalog Scraper Sync
 
 on:
   schedule:
-    # Runs every 4 hours (saves GitHub Actions minutes)
-    - cron: '0 */4 * * *'
+    # Runs every 12 hours (saves GitHub Actions minutes)
+    - cron: '0 */12 * * *'
   workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
