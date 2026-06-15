@@ -952,6 +952,63 @@ async function initNodemailer() {
 
 initNodemailer();
 
+const https = require('https');
+
+async function sendMailHelper(mailOptions) {
+  const host = process.env.SMTP_HOST;
+  const pass = process.env.SMTP_PASS;
+
+  if (host === 'smtp.resend.com' && pass && pass.startsWith('re_')) {
+    return new Promise((resolve, reject) => {
+      const postData = JSON.stringify({
+        from: mailOptions.from,
+        to: Array.isArray(mailOptions.to) ? mailOptions.to : [mailOptions.to],
+        subject: mailOptions.subject,
+        html: mailOptions.html
+      });
+
+      const options = {
+        hostname: 'api.resend.com',
+        port: 443,
+        path: '/emails',
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${pass}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(postData)
+        }
+      };
+
+      const req = https.request(options, (res) => {
+        let body = '';
+        res.on('data', (chunk) => body += chunk);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              const parsed = JSON.parse(body);
+              resolve({ messageId: parsed.id });
+            } catch (e) {
+              resolve({ messageId: 'unknown' });
+            }
+          } else {
+            reject(new Error(`Resend API returned status ${res.statusCode}: ${body}`));
+          }
+        });
+      });
+
+      req.on('error', (e) => reject(e));
+      req.write(postData);
+      req.end();
+    });
+  }
+
+  if (!mailTransporter) {
+    console.warn(`[Email Warning] Transporter not ready. Verification code/link could not be sent.`);
+    return { isFallback: true, messageId: 'fallback-no-transporter' };
+  }
+  return mailTransporter.sendMail(mailOptions);
+}
+
 function isValidCode(code) {
   const digits = code.split('').map(Number);
   let consecutiveCount = 1;
@@ -1032,31 +1089,25 @@ app.post('/api/auth/register', async (req, res) => {
       VALUES (?, ?, ?, 0, 0)
     `, [code, userId, expiresAt]);
     
-    if (mailTransporter) {
-      const mailOptions = {
-        from: '"B R V N" <noreply@brvn.com.mx>',
-        to: email.trim().toLowerCase(),
-        subject: 'Código de verificación - B R V N',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
-            <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
-            <p style="color: #666; font-size: 16px; line-height: 1.5; text-align: center;">Gracias por registrarte. Para completar tu registro, por favor ingresa el siguiente código de verificación:</p>
-            <div style="background-color: #f9f9f9; padding: 15px; text-align: center; border-radius: 6px; margin: 25px 0;">
-              <span style="font-size: 32px; font-weight: bold; letter-spacing: 0.1em; color: #000;">${code}</span>
-            </div>
-            <p style="color: #ff3b30; font-size: 13px; font-weight: bold; text-align: center; margin-top: 15px;">Este código expira en 5 minutos.</p>
+    const mailOptions = {
+      from: '"B R V N" <noreply@brvn.com.mx>',
+      to: email.trim().toLowerCase(),
+      subject: 'Código de verificación - B R V N',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+          <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
+          <p style="color: #666; font-size: 16px; line-height: 1.5; text-align: center;">Gracias por registrarte. Para completar tu registro, por favor ingresa el siguiente código de verificación:</p>
+          <div style="background-color: #f9f9f9; padding: 15px; text-align: center; border-radius: 6px; margin: 25px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 0.1em; color: #000;">${code}</span>
           </div>
-        `
-      };
-      
-      const info = await mailTransporter.sendMail(mailOptions);
+          <p style="color: #ff3b30; font-size: 13px; font-weight: bold; text-align: center; margin-top: 15px;">Este código expira en 5 minutos.</p>
+        </div>
+      `
+    };
+    
+    const info = await sendMailHelper(mailOptions);
+    if (!info.isFallback) {
       console.log(`[Email] Verification code sent to ${email}: ${info.messageId}`);
-      const previewUrl = nodemailer.getTestMessageUrl(info);
-      if (previewUrl) {
-        console.log(`[Email] Verification Code Preview URL: ${previewUrl}`);
-      }
-    } else {
-      console.warn(`[Email Warning] Transporter not ready. Generated verification code for ${email} is: ${code}`);
     }
     
     res.json({ success: true, message: 'Usuario registrado. Por favor verifica tu correo.', email: email.trim().toLowerCase() });
@@ -1077,6 +1128,9 @@ app.post('/api/auth/verify-email', async (req, res) => {
     const user = await dbQuery.get("SELECT * FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
     if (!user) {
       return res.status(404).json({ error: 'Usuario no encontrado.' });
+    }
+    if (user.verified === 1) {
+      return res.status(400).json({ error: 'La cuenta ya está verificada.' });
     }
     
     const lastCode = await dbQuery.get(`
@@ -1147,6 +1201,9 @@ app.post('/api/auth/resend-code', async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'Usuario no encontrado.' });
     }
+    if (user.verified === 1) {
+      return res.status(400).json({ error: 'La cuenta ya está verificada.' });
+    }
     
     // Invalidate previous codes
     await dbQuery.run("UPDATE verification_codes SET used = 1 WHERE user_id = ?", [user.id]);
@@ -1159,31 +1216,25 @@ app.post('/api/auth/resend-code', async (req, res) => {
       VALUES (?, ?, ?, 0, 0)
     `, [code, user.id, expiresAt]);
     
-    if (mailTransporter) {
-      const mailOptions = {
-        from: '"B R V N" <noreply@brvn.com.mx>',
-        to: email.trim().toLowerCase(),
-        subject: 'Nuevo código de verificación - B R V N',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
-            <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
-            <p style="color: #666; font-size: 16px; line-height: 1.5; text-align: center;">Aquí está tu nuevo código de verificación:</p>
-            <div style="background-color: #f9f9f9; padding: 15px; text-align: center; border-radius: 6px; margin: 25px 0;">
-              <span style="font-size: 32px; font-weight: bold; letter-spacing: 0.1em; color: #000;">${code}</span>
-            </div>
-            <p style="color: #ff3b30; font-size: 13px; font-weight: bold; text-align: center; margin-top: 15px;">Este código expira en 5 minutos.</p>
+    const mailOptions = {
+      from: '"B R V N" <noreply@brvn.com.mx>',
+      to: email.trim().toLowerCase(),
+      subject: 'Nuevo código de verificación - B R V N',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+          <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
+          <p style="color: #666; font-size: 16px; line-height: 1.5; text-align: center;">Aquí está tu nuevo código de verificación:</p>
+          <div style="background-color: #f9f9f9; padding: 15px; text-align: center; border-radius: 6px; margin: 25px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 0.1em; color: #000;">${code}</span>
           </div>
-        `
-      };
-      
-      const info = await mailTransporter.sendMail(mailOptions);
+          <p style="color: #ff3b30; font-size: 13px; font-weight: bold; text-align: center; margin-top: 15px;">Este código expira en 5 minutos.</p>
+        </div>
+      `
+    };
+    
+    const info = await sendMailHelper(mailOptions);
+    if (!info.isFallback) {
       console.log(`[Email] New code sent to ${email}: ${info.messageId}`);
-      const previewUrl = nodemailer.getTestMessageUrl(info);
-      if (previewUrl) {
-        console.log(`[Email] Resend Code Preview URL: ${previewUrl}`);
-      }
-    } else {
-      console.warn(`[Email Warning] Transporter not ready. New code for ${email} is: ${code}`);
     }
     
     res.json({ success: true, message: 'Nuevo código enviado con éxito.' });
@@ -1209,37 +1260,30 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     if (user) {
       const resetToken = jwt.sign({ resetUserId: user.id, email: user.email }, CUSTOMER_JWT_SECRET, { expiresIn: '15m' });
       
-      if (mailTransporter) {
-        const host = req.get('host');
-        const protocol = req.protocol;
-        const baseUrl = `${protocol}://${host}`;
-        
-        const mailOptions = {
-          from: '"B R V N" <noreply@brvn.com.mx>',
-          to: email.trim().toLowerCase(),
-          subject: 'Restablecer contraseña - B R V N',
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
-              <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
-              <p style="color: #666; font-size: 16px; line-height: 1.5;">Recibimos una solicitud para restablecer tu contraseña. Haz clic en el siguiente enlace para crear una nueva contraseña:</p>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${baseUrl}/reset-password.html?token=${resetToken}" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; display: inline-block;">Restablecer Contraseña</a>
-              </div>
-              <p style="color: #999; font-size: 12px; text-align: center; margin-top: 15px;">Este enlace es válido por 15 minutos.</p>
+      const host = req.get('host');
+      const protocol = req.protocol;
+      const baseUrl = `${protocol}://${host}`;
+      
+      const mailOptions = {
+        from: '"B R V N" <noreply@brvn.com.mx>',
+        to: email.trim().toLowerCase(),
+        subject: 'Restablecer contraseña - B R V N',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 8px;">
+            <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
+            <p style="color: #666; font-size: 16px; line-height: 1.5;">Recibimos una solicitud para restablecer tu contraseña. Haz clic en el siguiente enlace para crear una nueva contraseña:</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${baseUrl}/reset-password.html?token=${resetToken}" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; display: inline-block;">Restablecer Contraseña</a>
             </div>
-          `
-        };
-        
-        const info = await mailTransporter.sendMail(mailOptions);
+            <p style="color: #999; font-size: 12px; text-align: center; margin-top: 15px;">Este enlace es válido por 15 minutos.</p>
+          </div>
+        `
+      };
+      
+      const info = await sendMailHelper(mailOptions);
+      if (!info.isFallback) {
         console.log(`[Email] Password reset sent to ${email}: ${info.messageId}`);
-        const previewUrl = nodemailer.getTestMessageUrl(info);
-        if (previewUrl) {
-          console.log(`[Email] Reset Link Preview URL: ${previewUrl}`);
-        }
       } else {
-        const host = req.get('host');
-        const protocol = req.protocol;
-        const baseUrl = `${protocol}://${host}`;
         console.warn(`[Email Warning] Transporter not ready. Reset link for ${email} is: ${baseUrl}/reset-password.html?token=${resetToken}`);
       }
     }
