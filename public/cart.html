@@ -53,10 +53,21 @@
           <span>Subtotal</span>
           <span id="summary-subtotal">$0 MXN</span>
         </div>
+        <div class="summary-row" id="summary-discount-row" style="display: none; color: #e53e3e; font-weight: 500;">
+          <span>Descuento (<span id="summary-discount-percent">0</span>%)</span>
+          <span id="summary-discount-value">-$0 MXN</span>
+        </div>
         <div class="summary-row">
           <span>Envío</span>
           <span id="summary-shipping" style="color: var(--text-secondary); font-weight: 500;">Por cotizar</span>
         </div>
+        
+        <!-- Coupon input section -->
+        <div class="coupon-section" style="margin: 15px 0; display: flex; gap: 8px;">
+          <input type="text" id="coupon-code-input" placeholder="Código de cupón" style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; text-transform: uppercase;">
+          <button type="button" id="apply-coupon-btn" style="padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid #ddd; background: #f9f9f9; font-weight: 600;">Aplicar</button>
+        </div>
+        <div id="coupon-message" style="font-size: 12px; margin-top: -10px; margin-bottom: 15px; display: none; font-weight: 500;"></div>
         
         <div class="summary-row summary-total">
           <span>Total</span>

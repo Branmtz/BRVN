@@ -17,6 +17,8 @@ let selectedSize = null;
 let currentProduct = null;
 let currentImageIdx = 0;
 let selectedShippingRate = null;
+window.appliedCouponCode = null;
+window.appliedDiscountPercent = 0;
 
 // Hero Carousel State
 let currentCarouselSlideIdx = 0;
@@ -197,13 +199,17 @@ function buildProductCard(p, imgClass = '') {
   const heartActive = p.isFavorite ? 'active' : '';
   const heartIcon = p.isFavorite ? 'fa-solid' : 'fa-regular';
   
+  const isPicafresa = p.title && p.title.toLowerCase().includes('picafresa');
+  const originText = (isPicafresa && p.origin === 'PAPS') ? 'Dulce' : (p.origin === 'PAPS' ? 'PAPS' : 'Importado');
+  const brandText = (isPicafresa && p.brand === 'PAPS') ? 'Dulce' : (p.brand || 'Calzado');
+  
   return `
     <article class="product-card" onclick="window.location.href='/product.html?id=${p.id}'">
       <button class="favorite-btn ${heartActive}" onclick="toggleFavorite(event, '${p.id}')" title="Guardar en favoritos">
         <i class="${heartIcon} fa-heart"></i>
       </button>
       <span class="origin-tag ${p.origin}">
-        ${p.origin === 'PAPS' ? 'PAPS' : 'Importado'}
+        ${originText}
       </span>
       ${(p.is_bestseller === 1 || p.is_bestseller === true || p.is_bestseller === '1') ? `
       <span class="bestseller-tag">
@@ -214,7 +220,7 @@ function buildProductCard(p, imgClass = '') {
         <img src="${mainImg}" alt="${p.title}" loading="lazy">
       </div>
       <div class="product-info">
-        <span class="product-brand">${p.brand || 'Calzado'}</span>
+        <span class="product-brand">${brandText}</span>
         <h3 class="product-title">${p.title}</h3>
         <div class="product-meta">
           <span class="product-price">$${p.price.toLocaleString()} MXN</span>
@@ -897,12 +903,20 @@ window.toggleFavorite = async function(event, productId) {
 
 /* --- Cart Page Logic --- */
 function initCartPage() {
+  window.appliedCouponCode = null;
+  window.appliedDiscountPercent = 0;
+
   renderCart();
   checkAndPrefillCartForm();
   
   const checkoutForm = document.getElementById('checkout-form');
   if (checkoutForm) {
     checkoutForm.addEventListener('submit', handleCheckoutSubmit);
+  }
+
+  const applyBtn = document.getElementById('apply-coupon-btn');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', window.applyCoupon);
   }
 
   const zipInput = document.getElementById('client-zip');
@@ -969,9 +983,7 @@ function renderCart() {
   `).join('');
   
   // Update totals
-  const total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  document.getElementById('summary-subtotal').textContent = `$${total.toLocaleString()} MXN`;
-  document.getElementById('summary-total-value').textContent = `$${total.toLocaleString()} MXN`;
+  window.updateOrderSummaryTotals();
 }
 
 window.updateQty = function(idx, change) {
@@ -1068,7 +1080,8 @@ async function handleCheckoutSubmit(e) {
         customerPhone,
         shippingAddress,
         shippingCarrier: selectedShippingRate.name,
-        items: cart.map(i => ({ id: i.id, size: i.size, color: i.color, qty: i.qty }))
+        items: cart.map(i => ({ id: i.id, size: i.size, color: i.color, qty: i.qty })),
+        couponCode: window.appliedCouponCode
       })
     });
     
@@ -1387,8 +1400,47 @@ window.switchDashboardTab = function(tabName) {
     loadDashboardOrders();
   } else if (tabName === 'favorites') {
     loadDashboardFavorites();
+  } else if (tabName === 'coupons') {
+    loadDashboardCoupons();
   }
 };
+
+async function loadDashboardCoupons() {
+  const listEl = document.getElementById('profile-coupons-list');
+  if (!listEl) return;
+  
+  listEl.innerHTML = `
+    <div style="text-align: center; padding: 32px; color: var(--text-secondary);">
+      <i class="fa-solid fa-spinner fa-spin" style="font-size: 20px; margin-bottom: 8px;"></i>
+      <p>Cargando tus descuentos...</p>
+    </div>
+  `;
+  
+  try {
+    const res = await fetchWithAuth('/api/coupons');
+    if (!res.ok) throw new Error('Failed to fetch coupons');
+    const data = await res.json();
+    
+    const coupons = data.coupons || [];
+    if (coupons.length === 0) {
+      listEl.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 16px;">No tienes cupones disponibles en este momento.</p>';
+      return;
+    }
+    
+    listEl.innerHTML = coupons.map(coupon => `
+      <div class="coupon-box" style="border: 1px dashed #ddd; padding: 16px; border-radius: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; background: #fff;">
+        <div>
+          <div style="font-weight: 600; font-size: 14px; color: var(--text-primary);">${coupon.description || 'Descuento disponible'}</div>
+          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Valor: ${coupon.discount_percent}% de descuento</div>
+        </div>
+        <span class="coupon-code" onclick="copyCoupon('${coupon.code}')" style="cursor: pointer; background: #e2e8f0; color: #475569; padding: 6px 12px; border-radius: 4px; font-weight: 700; font-family: monospace; font-size: 13px;">${coupon.code}</span>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.error(err);
+    listEl.innerHTML = '<p style="color: #e53e3e; text-align: center; padding: 16px;">Error al cargar tus cupones. Inténtalo de nuevo.</p>';
+  }
+}
 
 async function loadDashboardOrders() {
   const listEl = document.getElementById('profile-orders-list');
@@ -1913,6 +1965,124 @@ window.fetchShippingQuotes = async function(zip) {
   }
 };
 
+window.updateOrderSummaryTotals = function() {
+  const cart = JSON.parse(localStorage.getItem('paps_cart') || '[]');
+  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+  
+  const discountPercent = window.appliedDiscountPercent || 0;
+  const discountAmount = subtotal * (discountPercent / 100);
+  const discountedSubtotal = subtotal - discountAmount;
+  
+  const shippingCost = window.selectedShippingRate ? window.selectedShippingRate.price : 0;
+  const total = Math.max(0, Math.round((discountedSubtotal + shippingCost) * 100) / 100);
+
+  // Update UI Elements
+  const subtotalEl = document.getElementById('summary-subtotal');
+  if (subtotalEl) {
+    subtotalEl.textContent = `$${subtotal.toLocaleString()} MXN`;
+  }
+
+  const discountRow = document.getElementById('summary-discount-row');
+  const discountPercentEl = document.getElementById('summary-discount-percent');
+  const discountValueEl = document.getElementById('summary-discount-value');
+  
+  if (discountRow) {
+    if (discountPercent > 0) {
+      discountRow.style.display = 'flex';
+      if (discountPercentEl) discountPercentEl.textContent = discountPercent;
+      if (discountValueEl) discountValueEl.textContent = `-$${discountAmount.toLocaleString()} MXN`;
+    } else {
+      discountRow.style.display = 'none';
+    }
+  }
+
+  const shippingEl = document.getElementById('summary-shipping');
+  if (shippingEl) {
+    if (window.selectedShippingRate) {
+      shippingEl.textContent = `$${shippingCost.toLocaleString()} MXN`;
+      shippingEl.style.color = 'var(--text-primary)';
+      shippingEl.style.fontWeight = '600';
+    } else {
+      shippingEl.textContent = 'Por cotizar';
+      shippingEl.style.color = 'var(--text-secondary)';
+      shippingEl.style.fontWeight = '500';
+    }
+  }
+
+  const totalEl = document.getElementById('summary-total-value');
+  if (totalEl) {
+    totalEl.textContent = `$${total.toLocaleString()} MXN`;
+  }
+};
+
+window.applyCoupon = async function() {
+  const inputEl = document.getElementById('coupon-code-input');
+  const messageEl = document.getElementById('coupon-message');
+  if (!inputEl) return;
+  
+  const code = inputEl.value.trim();
+  if (!code) {
+    if (messageEl) {
+      messageEl.textContent = 'Por favor ingresa un código de cupón.';
+      messageEl.style.color = '#e53e3e';
+      messageEl.style.display = 'block';
+    }
+    return;
+  }
+
+  if (!getAuthToken()) {
+    if (messageEl) {
+      messageEl.textContent = 'Inicia sesión para aplicar un cupón.';
+      messageEl.style.color = '#e53e3e';
+      messageEl.style.display = 'block';
+    }
+    return;
+  }
+  
+  try {
+    const res = await fetchWithAuth('/api/coupons/validate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ code })
+    });
+    
+    const data = await res.json();
+    if (res.ok && data.success) {
+      window.appliedCouponCode = data.code;
+      window.appliedDiscountPercent = data.discount_percent;
+      
+      if (messageEl) {
+        messageEl.textContent = `Cupón aplicado: ${data.description || `${data.discount_percent}% de descuento`}`;
+        messageEl.style.color = '#38a169';
+        messageEl.style.display = 'block';
+      }
+      
+      window.updateOrderSummaryTotals();
+    } else {
+      window.appliedCouponCode = null;
+      window.appliedDiscountPercent = 0;
+      if (messageEl) {
+        messageEl.textContent = data.error || 'El cupón no es válido.';
+        messageEl.style.color = '#e53e3e';
+        messageEl.style.display = 'block';
+      }
+      window.updateOrderSummaryTotals();
+    }
+  } catch (err) {
+    console.error('Error validating coupon:', err);
+    window.appliedCouponCode = null;
+    window.appliedDiscountPercent = 0;
+    if (messageEl) {
+      messageEl.textContent = 'Error al validar el cupón. Inténtalo de nuevo.';
+      messageEl.style.color = '#e53e3e';
+      messageEl.style.display = 'block';
+    }
+    window.updateOrderSummaryTotals();
+  }
+};
+
 window.selectShippingRate = function(radioInput, idx, price, carrierName) {
   // Set the active class on the card
   const cards = document.querySelectorAll('.shipping-rate-card');
@@ -1933,44 +2103,16 @@ window.selectShippingRate = function(radioInput, idx, price, carrierName) {
   selectedShippingRate = selection;
   window.selectedShippingRate = selection;
   
-  // Update checkout summary Envío cost
-  const shippingEl = document.getElementById('summary-shipping');
-  if (shippingEl) {
-    shippingEl.textContent = `$${price.toLocaleString()} MXN`;
-    shippingEl.style.color = 'var(--text-primary)';
-    shippingEl.style.fontWeight = '600';
-  }
-  
-  // Update total: subtotal + shipping price
-  const cart = JSON.parse(localStorage.getItem('paps_cart') || '[]');
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  const total = subtotal + price;
-  
-  const totalEl = document.getElementById('summary-total-value');
-  if (totalEl) {
-    totalEl.textContent = `$${total.toLocaleString()} MXN`;
-  }
+  // Update checkout summary
+  window.updateOrderSummaryTotals();
 };
 
 window.resetShippingChoice = function() {
   selectedShippingRate = null;
   window.selectedShippingRate = null;
   
-  // Set shipping summary back to Por cotizar
-  const shippingEl = document.getElementById('summary-shipping');
-  if (shippingEl) {
-    shippingEl.textContent = 'Por cotizar';
-    shippingEl.style.color = 'var(--text-secondary)';
-    shippingEl.style.fontWeight = '500';
-  }
-  
-  // Reset summary total to subtotal only
-  const cart = JSON.parse(localStorage.getItem('paps_cart') || '[]');
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-  const totalEl = document.getElementById('summary-total-value');
-  if (totalEl) {
-    totalEl.textContent = `$${subtotal.toLocaleString()} MXN`;
-  }
+  // Update checkout summary
+  window.updateOrderSummaryTotals();
 };
 
 // Hero Carousel Logic

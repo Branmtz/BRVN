@@ -109,6 +109,12 @@ async function handleOrderPaymentSuccess(orderId, paymentId) {
       await dbQuery.run("UPDATE orders SET status = 'paid', mp_payment_id = ?, tracking_status = 'compra_realizada' WHERE id = ?", [paymentId, orderId]);
       console.log(`[Payment Success] Order ${orderId} successfully marked as paid. PaymentID: ${paymentId}`);
       
+      // Delete coupon if used
+      if (order.coupon_code && order.customer_id) {
+        await dbQuery.run("DELETE FROM user_coupons WHERE user_id = ? AND LOWER(code) = ?", [order.customer_id, order.coupon_code.toLowerCase()]);
+        console.log(`[Payment Success] Coupon ${order.coupon_code} deleted for customer ${order.customer_id}`);
+      }
+      
       // 2. Decrement stock for PAPS products
       const items = JSON.parse(order.items || '[]');
       for (const item of items) {
@@ -522,7 +528,7 @@ app.get('/api/products/:id/sync', optionalAuthenticateCustomer, async (req, res)
 
 // POST Checkout and Payment preference generation
 app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
-  const { customerName, customerEmail, customerPhone, shippingAddress, items, shippingCarrier } = req.body;
+  const { customerName, customerEmail, customerPhone, shippingAddress, items, shippingCarrier, couponCode } = req.body;
   
   if (!customerName || !customerEmail || !customerPhone || !shippingAddress || !items || items.length === 0) {
     return res.status(400).json({ error: 'Todos los campos son obligatorios.' });
@@ -542,8 +548,25 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       }
     }
 
+    // Validate Coupon if provided
+    let discountPercent = 0;
+    let coupon = null;
+    if (couponCode) {
+      if (!customerId) {
+        return res.status(400).json({ error: 'Inicia sesión para aplicar un cupón.' });
+      }
+      coupon = await dbQuery.get(
+        "SELECT * FROM user_coupons WHERE user_id = ? AND LOWER(code) = ? AND used = 0",
+        [customerId, couponCode.trim().toLowerCase()]
+      );
+      if (!coupon) {
+        return res.status(400).json({ error: 'El cupón no es válido o ya fue utilizado.' });
+      }
+      discountPercent = coupon.discount_percent || 0;
+    }
+
     // 1. Calculate secure total from DB prices (prevent client-side tampering)
-    let calculatedTotal = 0;
+    let itemsSubtotal = 0;
     const finalItems = [];
     
     for (const item of items) {
@@ -579,7 +602,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       }
       
       const securePrice = calculatePrice(product.supplier_price);
-      calculatedTotal += securePrice * item.qty;
+      itemsSubtotal += securePrice * item.qty;
       
       finalItems.push({
         id: product.id,
@@ -591,6 +614,9 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
         qty: item.qty
       });
     }
+
+    const discountAmount = itemsSubtotal * (discountPercent / 100);
+    let calculatedTotal = itemsSubtotal - discountAmount;
 
     // Secure Shipping Calculation
     let selectedShippingCost = 150; // default/fallback flat shipping fee
@@ -628,6 +654,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     }
     
     calculatedTotal += selectedShippingCost;
+    calculatedTotal = Math.round(calculatedTotal * 100) / 100;
     
     // 2. Generate unique Folio
     const lastOrder = await dbQuery.get("SELECT id FROM orders ORDER BY created_at DESC LIMIT 1");
@@ -641,8 +668,8 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     // 3. Register Order in Pending state
     await dbQuery.run(`
       INSERT INTO orders (
-        id, customer_name, customer_email, customer_phone, shipping_address, items, total, status, customer_id, shipping_carrier
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        id, customer_name, customer_email, customer_phone, shipping_address, items, total, status, customer_id, shipping_carrier, coupon_code
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
     `, [
       orderFolio,
       customerName,
@@ -652,7 +679,8 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       JSON.stringify(finalItems),
       calculatedTotal,
       customerId,
-      finalCarrierName
+      finalCarrierName,
+      coupon ? coupon.code : null
     ]);
 
     // Bypassing payment preference creation for zero cost test checkout
@@ -1169,6 +1197,14 @@ app.post('/api/auth/verify-email', async (req, res) => {
     // Success: Mark code as used and update user verified
     await dbQuery.run("UPDATE verification_codes SET used = 1 WHERE id = ?", [lastCode.id]);
     await dbQuery.run("UPDATE users SET verified = 1 WHERE id = ?", [user.id]);
+
+    // Seed welcome coupons
+    try {
+      await dbQuery.run("INSERT INTO user_coupons (user_id, code, description, discount_percent, used) VALUES (?, 'MIPRIMERCOMPRA', '10% de Descuento en tu Primer Pedido', 10, 0)", [user.id]);
+      await dbQuery.run("INSERT INTO user_coupons (user_id, code, description, discount_percent, used) VALUES (?, 'PAPSGIFT', 'Regalo en tu Primera Compra', 0, 0)", [user.id]);
+    } catch (couponErr) {
+      console.error('Error seeding coupons for verified user:', couponErr.message);
+    }
     
     const fullName = `${user.nombre} ${user.apellido_pat} ${user.apellido_mat}`.trim();
     const token = jwt.sign({ id: user.id, email: user.email, name: fullName }, CUSTOMER_JWT_SECRET, { expiresIn: '30d' });
@@ -1340,6 +1376,43 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
 /* --- CUSTOMER APIS --- */
 
+// GET active coupons for customer
+app.get('/api/coupons', authenticateCustomer, async (req, res) => {
+  try {
+    const coupons = await dbQuery.all("SELECT code, description, discount_percent FROM user_coupons WHERE user_id = ? AND used = 0", [req.customer.id]);
+    res.json({ success: true, coupons });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener los cupones.' });
+  }
+});
+
+// POST validate coupon code
+app.post('/api/coupons/validate', authenticateCustomer, async (req, res) => {
+  const { code } = req.body;
+  if (!code) {
+    return res.status(400).json({ error: 'El código de cupón es obligatorio.' });
+  }
+  try {
+    const dbCoupon = await dbQuery.get(
+      "SELECT * FROM user_coupons WHERE user_id = ? AND LOWER(code) = ? AND used = 0",
+      [req.customer.id, code.trim().toLowerCase()]
+    );
+    if (!dbCoupon) {
+      return res.status(400).json({ error: 'El cupón no es válido o ya fue utilizado.' });
+    }
+    res.json({
+      success: true,
+      code: dbCoupon.code,
+      description: dbCoupon.description,
+      discount_percent: dbCoupon.discount_percent
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al validar el cupón.' });
+  }
+});
+
 // POST Customer Register
 app.post('/api/customer/register', async (req, res) => {
   const { name, email, phone, password } = req.body;
@@ -1365,6 +1438,15 @@ app.post('/api/customer/register', async (req, res) => {
     `, [nombre, apellido_pat, apellido_mat, email.trim().toLowerCase(), phone ? phone.trim() : '', hash]);
     
     const user = await dbQuery.get("SELECT id FROM users WHERE LOWER(email) = ?", [email.trim().toLowerCase()]);
+    
+    // Seed welcome coupons
+    try {
+      await dbQuery.run("INSERT INTO user_coupons (user_id, code, description, discount_percent, used) VALUES (?, 'MIPRIMERCOMPRA', '10% de Descuento en tu Primer Pedido', 10, 0)", [user.id]);
+      await dbQuery.run("INSERT INTO user_coupons (user_id, code, description, discount_percent, used) VALUES (?, 'PAPSGIFT', 'Regalo en tu Primera Compra', 0, 0)", [user.id]);
+    } catch (couponErr) {
+      console.error('Error seeding coupons for registered customer:', couponErr.message);
+    }
+
     const token = jwt.sign({ id: user.id, email: email.trim().toLowerCase(), name: name.trim() }, CUSTOMER_JWT_SECRET, { expiresIn: '30d' });
     
     res.json({ success: true, token, customer: { id: user.id, name: name.trim(), email: email.trim().toLowerCase() } });

@@ -543,13 +543,8 @@
             <h2 style="font-size: 20px; font-weight: 600; margin-bottom: 8px;">Descuentos Disponibles</h2>
             <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 24px;">Da click en cualquier cupón para copiar el código promocional.</p>
             
-            <div class="coupon-box">
-              <div style="font-weight: 600; font-size: 14px;">10% de Descuento en tu Primer Pedido</div>
-              <span class="coupon-code" onclick="copyCoupon('MIPRIMERCOMPRA')">MIPRIMERCOMPRA</span>
-            </div>
-            <div class="coupon-box">
-              <div style="font-weight: 600; font-size: 14px;">Regalo en tu Primera Compra</div>
-              <span class="coupon-code" onclick="copyCoupon('PAPSGIFT')">PAPSGIFT</span>
+            <div id="profile-coupons-list" style="display: flex; flex-direction: column; gap: 12px;">
+              <!-- Coupons loaded dynamically -->
             </div>
           </div>
         </div>

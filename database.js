@@ -264,6 +264,21 @@ async function initializeDatabase() {
     `);
     console.log('Verification codes table verified/created.');
 
+    // Create user_coupons table
+    await dbQuery.run(`
+      CREATE TABLE IF NOT EXISTS user_coupons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        code TEXT NOT NULL,
+        description TEXT,
+        discount_percent REAL DEFAULT 0,
+        used INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('User coupons table verified/created.');
+
     // 4. Create Catalog Sources Table (for Hourly Auto-Scraper)
     await dbQuery.run(`
       CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -300,10 +315,10 @@ async function initializeDatabase() {
     // 6. Create Favorites Table (Saved items)
     await dbQuery.run(`
       CREATE TABLE IF NOT EXISTS favorites (
-        customer_id TEXT NOT NULL,
+        customer_id INTEGER NOT NULL,
         product_id TEXT NOT NULL,
         PRIMARY KEY (customer_id, product_id),
-        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+        FOREIGN KEY (customer_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
       )
     `);
@@ -313,23 +328,94 @@ async function initializeDatabase() {
     await dbQuery.run(`
       CREATE TABLE IF NOT EXISTS ratings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_id TEXT NOT NULL,
+        customer_id INTEGER NOT NULL,
         product_id TEXT NOT NULL,
         order_id TEXT NOT NULL,
         rating INTEGER CHECK(rating >= 1 AND rating <= 5),
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(customer_id, product_id, order_id),
-        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+        FOREIGN KEY (customer_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
         FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
       )
     `);
     console.log('Ratings table verified/created.');
 
+    // Migration for favorites and ratings: check if they point to customers and migrate to users
+    try {
+      const favoritesFkList = await dbQuery.all("PRAGMA foreign_key_list(favorites)");
+      const pointsToCustomers = favoritesFkList.some(fk => fk.table === 'customers');
+      if (pointsToCustomers) {
+        console.log('Migrating favorites table: changing foreign key from customers to users...');
+        await dbQuery.run("ALTER TABLE favorites RENAME TO favorites_old");
+        await dbQuery.run(`
+          CREATE TABLE favorites (
+            customer_id INTEGER NOT NULL,
+            product_id TEXT NOT NULL,
+            PRIMARY KEY (customer_id, product_id),
+            FOREIGN KEY (customer_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+          )
+        `);
+        try {
+          await dbQuery.run("INSERT OR IGNORE INTO favorites (customer_id, product_id) SELECT CAST(customer_id AS INTEGER), product_id FROM favorites_old");
+          await dbQuery.run("DROP TABLE favorites_old");
+          console.log('Favorites table successfully migrated.');
+        } catch (copyErr) {
+          console.error('Error copying favorites data during migration:', copyErr.message);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not check or migrate favorites foreign key:', err.message);
+    }
+
+    try {
+      const ratingsFkList = await dbQuery.all("PRAGMA foreign_key_list(ratings)");
+      const ratingsPointsToCustomers = ratingsFkList.some(fk => fk.table === 'customers');
+      if (ratingsPointsToCustomers) {
+        console.log('Migrating ratings table: changing foreign key from customers to users...');
+        await dbQuery.run("ALTER TABLE ratings RENAME TO ratings_old");
+        await dbQuery.run(`
+          CREATE TABLE ratings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL,
+            product_id TEXT NOT NULL,
+            order_id TEXT NOT NULL,
+            rating INTEGER CHECK(rating >= 1 AND rating <= 5),
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(customer_id, product_id, order_id),
+            FOREIGN KEY (customer_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+          )
+        `);
+        try {
+          await dbQuery.run(`
+            INSERT OR IGNORE INTO ratings (id, customer_id, product_id, order_id, rating, created_at)
+            SELECT id, CAST(customer_id AS INTEGER), product_id, order_id, rating, created_at FROM ratings_old
+          `);
+          await dbQuery.run("DROP TABLE ratings_old");
+          console.log('Ratings table successfully migrated.');
+        } catch (copyErr) {
+          console.error('Error copying ratings data during migration:', copyErr.message);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not check or migrate ratings foreign key:', err.message);
+    }
+
     // Migration for orders table: add customer_id if not present
     try {
       await dbQuery.run("ALTER TABLE orders ADD COLUMN customer_id TEXT DEFAULT NULL");
       console.log('Migrated: customer_id column added to orders.');
+    } catch (e) {
+      // column likely already exists
+    }
+
+    // Migration for orders table: add coupon_code if not present
+    try {
+      await dbQuery.run("ALTER TABLE orders ADD COLUMN coupon_code TEXT DEFAULT NULL");
+      console.log('Migrated: coupon_code column added to orders.');
     } catch (e) {
       // column likely already exists
     }
