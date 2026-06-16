@@ -110,7 +110,7 @@
       <i class="fa-solid fa-house"></i>
       <span>Inicio</span>
     </a>
-    <a class="bottom-nav-item" onclick="toggleMobileSearch()" id="bottom-nav-search">
+    <a class="bottom-nav-item" href="/index.html" id="bottom-nav-search">
       <i class="fa-solid fa-magnifying-glass"></i>
       <span>Buscar</span>
     </a>
@@ -131,15 +131,7 @@
     </a>
   </nav>
 
-  <!-- Mobile Slide-Up Search Bar -->
-  <div id="mobile-search-overlay" onclick="toggleMobileSearch()"></div>
-  <div id="mobile-search-sheet">
-    <div class="mobile-search-input-wrapper">
-      <i class="fa-solid fa-magnifying-glass search-sheet-icon"></i>
-      <input type="text" id="mobile-search-sheet-input" placeholder="Buscar por modelo, marca o SKU..." onkeyup="handleMobileSheetSearch(event)">
-      <button class="close-search-sheet-btn" onclick="toggleMobileSearch()"><i class="fa-solid fa-xmark"></i></button>
-    </div>
-  </div>
+
 
   <script src="/js/app.js?v=1.5"></script>
 </body>

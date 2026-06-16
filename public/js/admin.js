@@ -1008,3 +1008,111 @@ window.executePurgeProducts = async function() {
     }
   }
 };
+
+/* ── Admin: Global Coupons ─────────────────────────────── */
+
+window.loadAdminCoupons = async function() {
+  const listEl = document.getElementById('admin-coupons-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p style="color:#aaa;">Cargando...</p>';
+  try {
+    const token = localStorage.getItem('admin_token');
+    const res = await fetch('/api/admin/coupons', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (!data.success || data.coupons.length === 0) {
+      listEl.innerHTML = '<p style="color:#aaa; font-style: italic;">No hay cupones globales creados aún.</p>';
+      return;
+    }
+    listEl.innerHTML = `
+      <table style="width:100%; border-collapse: collapse; font-size: 13px;">
+        <thead>
+          <tr style="border-bottom: 2px solid #e5e5e5; text-align: left; color: var(--text-secondary);">
+            <th style="padding: 8px 12px;">Código</th>
+            <th style="padding: 8px 12px;">Descripción</th>
+            <th style="padding: 8px 12px;">Tipo</th>
+            <th style="padding: 8px 12px;">Valor</th>
+            <th style="padding: 8px 12px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.coupons.map(c => `
+            <tr style="border-bottom: 1px solid #f0f0f0;">
+              <td style="padding: 10px 12px; font-weight: 700; font-family: monospace; font-size: 14px;">${c.code}</td>
+              <td style="padding: 10px 12px; color: var(--text-secondary);">${c.description || '—'}</td>
+              <td style="padding: 10px 12px;">${c.discount_type === 'percent' ? 'Porcentaje (%)' : 'Monto fijo ($)'}</td>
+              <td style="padding: 10px 12px; font-weight: 600; color: #34c759;">
+                ${c.discount_type === 'percent' ? c.discount_value + '%' : '$' + Number(c.discount_value).toLocaleString() + ' MXN'}
+              </td>
+              <td style="padding: 10px 12px; text-align: right;">
+                <button onclick="deleteAdminCoupon(${c.id}, '${c.code}')"
+                  style="background: none; border: 1px solid #ff3b30; color: #ff3b30; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; transition: all 0.15s;">
+                  <i class="fa-solid fa-trash-can"></i> Eliminar
+                </button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (err) {
+    listEl.innerHTML = `<p style="color:#ff3b30;">Error al cargar cupones: ${err.message}</p>`;
+  }
+};
+
+window.createAdminCoupon = async function() {
+  const code = document.getElementById('new-coupon-code')?.value?.trim();
+  const description = document.getElementById('new-coupon-desc')?.value?.trim();
+  const discount_type = document.getElementById('new-coupon-type')?.value;
+  const discount_value = document.getElementById('new-coupon-value')?.value;
+  const msgEl = document.getElementById('coupon-create-msg');
+
+  if (!code || !discount_value) {
+    if (msgEl) { msgEl.style.display = 'block'; msgEl.style.color = '#ff3b30'; msgEl.textContent = 'El código y el valor son obligatorios.'; }
+    return;
+  }
+
+  try {
+    const token = localStorage.getItem('admin_token');
+    const res = await fetch('/api/admin/coupons', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ code, description, discount_type, discount_value: parseFloat(discount_value) })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (msgEl) { msgEl.style.display = 'block'; msgEl.style.color = '#ff3b30'; msgEl.textContent = data.error; }
+      return;
+    }
+    if (msgEl) { msgEl.style.display = 'block'; msgEl.style.color = '#34c759'; msgEl.textContent = `✅ ${data.message}`; }
+    // Clear form
+    document.getElementById('new-coupon-code').value = '';
+    document.getElementById('new-coupon-desc').value = '';
+    document.getElementById('new-coupon-value').value = '';
+    // Reload list
+    loadAdminCoupons();
+  } catch (err) {
+    if (msgEl) { msgEl.style.display = 'block'; msgEl.style.color = '#ff3b30'; msgEl.textContent = `Error: ${err.message}`; }
+  }
+};
+
+window.deleteAdminCoupon = async function(id, code) {
+  if (!confirm(`¿Eliminar el cupón "${code}"?`)) return;
+  try {
+    const token = localStorage.getItem('admin_token');
+    const res = await fetch(`/api/admin/coupons/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (res.ok) {
+      loadAdminCoupons();
+    } else {
+      alert(`❌ ${data.error}`);
+    }
+  } catch (err) {
+    alert(`❌ Error: ${err.message}`);
+  }
+};
+

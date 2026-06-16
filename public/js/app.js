@@ -1237,10 +1237,10 @@ async function renderCategoriesGrid() {
   }
 }
 
-window.selectCategoryFromGrid = function(category) {
+window.selectCategoryFromGrid = async function(category) {
   // Usar selectCategory() directamente para mostrar el catálogo con productos
   // sin pasar por showMainLanding() que dejaba la pantalla vacía en el primer click
-  selectCategory(category);
+  await selectCategory(category);
 };
 
 /* --- Dynamic Trends Grid Panel --- */
@@ -2267,7 +2267,30 @@ let categoryFilteredProducts = [];
 let categoryCurrentPage = 0;
 let categoryScrollObserver = null;
 
-window.selectCategory = function(categoryName) {
+// Guarantee allProducts is loaded before any category filter runs.
+// Fixes race condition where selectCategory() fires before /api/products fetch completes.
+let _productsLoadPromise = null;
+async function ensureProductsLoaded() {
+  if (allProducts.length > 0) return;
+  if (_productsLoadPromise) return _productsLoadPromise;
+  _productsLoadPromise = fetchWithAuth('/api/products')
+    .then(res => {
+      if (!res.ok) throw new Error('Failed to fetch catalog');
+      return res.json();
+    })
+    .then(data => {
+      allProducts = data;
+      _productsLoadPromise = null;
+    })
+    .catch(err => {
+      _productsLoadPromise = null;
+      console.error('[ensureProductsLoaded]', err);
+    });
+  return _productsLoadPromise;
+}
+
+window.selectCategory = async function(categoryName) {
+  await ensureProductsLoaded();
   currentSelectedCategory = categoryName;
   categoryBrandFilter = 'all';
 
@@ -2546,7 +2569,8 @@ document.addEventListener('keydown', function(e) {
 
 
 
-window.executeGlobalSearch = function(query) {
+window.executeGlobalSearch = async function(query) {
+  await ensureProductsLoaded();
   currentSelectedCategory = 'Búsqueda';
   categoryBrandFilter = 'all';
 
