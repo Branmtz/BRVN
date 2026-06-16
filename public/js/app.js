@@ -1238,16 +1238,9 @@ async function renderCategoriesGrid() {
 }
 
 window.selectCategoryFromGrid = function(category) {
-  currentCategoryFilter = category;
-  const selectEl = document.getElementById('category-select');
-  if (selectEl) selectEl.value = category;
-  const selectElMobile = document.getElementById('mobile-category-select');
-  if (selectElMobile) selectElMobile.value = category;
-  
-  switchTab('home');
-  const input = getSearchInput();
-  const searchQuery = input ? input.value.toLowerCase().trim() : '';
-  applyFilters(searchQuery, currentGenderFilter, category, currentBrandFilter);
+  // Usar selectCategory() directamente para mostrar el catálogo con productos
+  // sin pasar por showMainLanding() que dejaba la pantalla vacía en el primer click
+  selectCategory(category);
 };
 
 /* --- Dynamic Trends Grid Panel --- */
