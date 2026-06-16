@@ -2416,6 +2416,14 @@ footer {
     align-items: flex-start;
     gap: 12px;
   }
+
+  .bottom-nav-item span {
+    display: none !important;
+  }
+
+  .bottom-nav-item i {
+    font-size: 24px;
+  }
 }
 
 /* ==========================================
