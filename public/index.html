@@ -177,26 +177,7 @@
         </a>
       </div>
 
-      <!-- Mobile Search and Filters (shown only on mobile under logo) -->
-      <div class="mobile-search-filters">
-        <div class="search-box">
-          <input type="text" id="mobile-search-input" placeholder="Buscar modelo, marca, SKU o ID..." onkeyup="searchProductsMobile()">
-        </div>
-        <div class="dropdowns-container">
-          <select id="mobile-gender-select" onchange="filterByGenderMobile(this.value)" class="filter-select">
-            <option value="all">Géneros</option>
-            <option value="Caballero">Caballero</option>
-            <option value="Dama">Dama</option>
-            <option value="Niños">Niños</option>
-          </select>
-          <select id="mobile-category-select" onchange="filterByCategoryMobile(this.value)" class="filter-select">
-            <option value="all">Categorías</option>
-          </select>
-          <select id="mobile-brand-select" onchange="filterByBrandMobile(this.value)" class="filter-select">
-            <option value="all">Marcas</option>
-          </select>
-        </div>
-      </div>
+
     </div>
   </header>
 
@@ -563,9 +544,9 @@
       <i class="fa-solid fa-house"></i>
       <span>Inicio</span>
     </a>
-    <a class="bottom-nav-item" onclick="switchTab('categories')" id="bottom-nav-categories">
-      <i class="fa-solid fa-layer-group"></i>
-      <span>Categorías</span>
+    <a class="bottom-nav-item" onclick="toggleMobileSearch()" id="bottom-nav-search">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <span>Buscar</span>
     </a>
     <a href="/cart.html" class="bottom-nav-item" id="bottom-nav-cart">
       <div class="cart-icon-wrapper">
@@ -583,6 +564,16 @@
       <span>Menú</span>
     </a>
   </nav>
+
+  <!-- Mobile Slide-Up Search Bar -->
+  <div id="mobile-search-overlay" onclick="toggleMobileSearch()"></div>
+  <div id="mobile-search-sheet">
+    <div class="mobile-search-input-wrapper">
+      <i class="fa-solid fa-magnifying-glass search-sheet-icon"></i>
+      <input type="text" id="mobile-search-sheet-input" placeholder="Buscar por modelo, marca o SKU..." onkeyup="handleMobileSheetSearch(event)">
+      <button class="close-search-sheet-btn" onclick="toggleMobileSearch()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+  </div>
 
   <!-- Mobile Slide-Up Menu Dropdown -->
   <div id="mobile-menu-overlay" onclick="closeMobileMenu()"></div>

@@ -121,6 +121,7 @@ async function initCatalogPage() {
   const params = new URLSearchParams(window.location.search);
   const tabParam = params.get('tab');
   const categoryParam = params.get('category');
+  const searchParam = params.get('search');
   
   try {
     // 1. Fetch catalog products
@@ -129,7 +130,9 @@ async function initCatalogPage() {
     allProducts = await res.json();
     
     // 2. Route parameters handling
-    if (categoryParam) {
+    if (searchParam) {
+      executeGlobalSearch(searchParam);
+    } else if (categoryParam) {
       selectCategory(categoryParam);
     } else if (tabParam === 'trends') {
       selectCategory('Lo más vendido');
@@ -2450,5 +2453,115 @@ window.scrollToCategories = function(event) {
   const target = document.getElementById('categories-section-anchor');
   if (target) {
     target.scrollIntoView({ behavior: 'smooth' });
+  }
+};
+
+/* --- Global Mobile Slide-Up Search Logic --- */
+window.toggleMobileSearch = function() {
+  const overlay = document.getElementById('mobile-search-overlay');
+  const sheet = document.getElementById('mobile-search-sheet');
+  if (!overlay || !sheet) return;
+
+  overlay.classList.toggle('active');
+  sheet.classList.toggle('active');
+
+  if (sheet.classList.contains('active')) {
+    const input = document.getElementById('mobile-search-sheet-input');
+    if (input) {
+      input.value = '';
+      setTimeout(() => input.focus(), 100);
+    }
+  }
+};
+
+window.executeGlobalSearch = function(query) {
+  currentSelectedCategory = 'Búsqueda';
+  categoryBrandFilter = 'all';
+
+  // Make sure we are on the Home view tab
+  const path = window.location.pathname;
+  const isIndex = path === '/' || path.includes('index.html') || path === '';
+  if (!isIndex) {
+    window.location.href = `/index.html?search=${encodeURIComponent(query)}`;
+    return;
+  }
+
+  // If we are on index, switch to home tab
+  if (typeof switchTab === 'function') {
+    switchTab('home');
+  }
+
+  // Toggle sections visibility
+  const landingContainer = document.getElementById('main-landing-container');
+  const catalogContainer = document.getElementById('category-catalog-container');
+  if (landingContainer) landingContainer.style.display = 'none';
+  if (catalogContainer) catalogContainer.style.display = 'block';
+
+  // Set category title
+  const titleEl = document.getElementById('category-catalog-title');
+  if (titleEl) titleEl.textContent = `Búsqueda: "${query}"`;
+
+  // Filter products by search query
+  const queryLower = query.toLowerCase().trim();
+  const baseProducts = allProducts.filter(p => {
+    return p.title.toLowerCase().includes(queryLower) ||
+           (p.description && p.description.toLowerCase().includes(queryLower)) ||
+           (p.brand && p.brand.toLowerCase().includes(queryLower)) ||
+           (p.sku && p.sku.toLowerCase().includes(queryLower)) ||
+           (p.id && String(p.id).toLowerCase().includes(queryLower));
+  });
+
+  // Sort baseProducts so that bestsellers appear first
+  baseProducts.sort((a, b) => {
+    const aBest = (a.is_bestseller === 1 || a.is_bestseller === true || a.is_bestseller === '1') ? 1 : 0;
+    const bBest = (b.is_bestseller === 1 || b.is_bestseller === true || b.is_bestseller === '1') ? 1 : 0;
+    return bBest - aBest;
+  });
+
+  // Populate brand filter dropdown
+  const brandSelect = document.getElementById('category-brand-select');
+  if (brandSelect) {
+    const brandsSet = new Set();
+    baseProducts.forEach(p => {
+      if (p.brand) brandsSet.add(p.brand.trim());
+    });
+    const sortedBrands = Array.from(brandsSet).sort();
+    
+    let optionsHtml = '<option value="all">Todas las Marcas</option>';
+    sortedBrands.forEach(b => {
+      optionsHtml += `<option value="${b}">${b}</option>`;
+    });
+    brandSelect.innerHTML = optionsHtml;
+    brandSelect.value = 'all';
+  }
+
+  // Hide mobile search/filters bar
+  const mobileBar = document.querySelector('.mobile-search-filters');
+  if (mobileBar) mobileBar.classList.add('hidden');
+
+  applyCategoryFilters(baseProducts);
+};
+
+window.handleMobileSheetSearch = function(event) {
+  const query = event.target.value.trim();
+  if (event.key === 'Enter') {
+    if (!query) return;
+    
+    const path = window.location.pathname;
+    const isIndex = path === '/' || path.includes('index.html') || path === '';
+    
+    if (!isIndex) {
+      window.location.href = `/index.html?search=${encodeURIComponent(query)}`;
+    } else {
+      executeGlobalSearch(query);
+      toggleMobileSearch();
+    }
+  } else {
+    // Live search on home page if they type at least 2 characters
+    const path = window.location.pathname;
+    const isIndex = path === '/' || path.includes('index.html') || path === '';
+    if (isIndex && query.length >= 2) {
+      executeGlobalSearch(query);
+    }
   }
 };
