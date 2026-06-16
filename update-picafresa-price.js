@@ -12,7 +12,7 @@ async function main() {
       description    = 'Picafresa suelta.',
       sku            = 'PICAFRESA-002',
       color          = 'Fresa',
-      origin         = 'PAPS',
+      origin         = 'BRVN',
       price          = 1,
       supplier_price = 1
     WHERE id = 'test-gratis'`,

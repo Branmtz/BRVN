@@ -758,7 +758,9 @@ window.selectSize = function(pillEl, size) {
 window.addToCart = function() {
   if (!currentProduct) return;
   
-  if (!selectedSize) {
+  const isPicafresa = currentProduct.title && currentProduct.title.toLowerCase().includes('picafresa');
+  
+  if (!selectedSize && !isPicafresa) {
     alert('Por favor, selecciona una talla antes de continuar.');
     return;
   }
@@ -776,7 +778,7 @@ window.addToCart = function() {
       id: currentProduct.id,
       sku: currentProduct.sku,
       title: currentProduct.title,
-      size: selectedSize,
+      size: selectedSize || 'Único',
       color: currentProduct.color,
       price: currentProduct.price,
       image: mainImg,
