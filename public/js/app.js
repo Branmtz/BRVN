@@ -623,7 +623,7 @@ function renderProductDetail() {
 
   // Render Sizes Selector
   const sizeSelector = document.getElementById('size-selector');
-  const sizeSection = sizeSelector ? sizeSelector.closest('div') : null;
+  const sizeSection = sizeSelector ? sizeSelector.closest('div').parentElement : null;
   const stockIndicator = document.getElementById('size-stock-indicator');
   if (stockIndicator) {
     stockIndicator.innerHTML = '';
