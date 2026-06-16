@@ -2486,6 +2486,66 @@ window.toggleMobileSearch = function() {
   }
 };
 
+/* ── Nav Search Dropdown ──────────────────────────────── */
+window.toggleNavSearch = function() {
+  const dropdown = document.getElementById('nav-search-dropdown');
+  const toggleBtn = document.getElementById('nav-search-toggle');
+  if (!dropdown) return;
+
+  const isOpen = dropdown.classList.contains('open');
+  if (isOpen) {
+    closeNavSearch();
+  } else {
+    dropdown.classList.add('open');
+    if (toggleBtn) toggleBtn.classList.add('open');
+    const input = document.getElementById('nav-search-input');
+    if (input) {
+      input.value = '';
+      setTimeout(() => input.focus(), 80);
+    }
+  }
+};
+
+window.closeNavSearch = function() {
+  const dropdown = document.getElementById('nav-search-dropdown');
+  const toggleBtn = document.getElementById('nav-search-toggle');
+  if (dropdown) dropdown.classList.remove('open');
+  if (toggleBtn) toggleBtn.classList.remove('open');
+};
+
+window.handleNavSearch = function(event) {
+  if (event.key === 'Escape') {
+    closeNavSearch();
+    return;
+  }
+  const query = event.target.value.trim();
+  if (event.key === 'Enter' && query.length > 0) {
+    closeNavSearch();
+    executeGlobalSearch(query);
+    return;
+  }
+  if (query.length >= 2) {
+    executeGlobalSearch(query);
+  } else if (query.length === 0) {
+    showMainLanding();
+  }
+};
+
+// Cerrar dropdown al hacer click fuera
+document.addEventListener('click', function(e) {
+  const wrapper = document.getElementById('nav-search-wrapper');
+  if (wrapper && !wrapper.contains(e.target)) {
+    closeNavSearch();
+  }
+});
+
+// Cerrar con Escape global
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeNavSearch();
+});
+
+
+
 window.executeGlobalSearch = function(query) {
   currentSelectedCategory = 'Búsqueda';
   categoryBrandFilter = 'all';
