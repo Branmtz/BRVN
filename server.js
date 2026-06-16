@@ -550,38 +550,19 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
 
     // Validate Coupon if provided
     let discountPercent = 0;
-    let discountAmount = 0;
-    let discountType = 'percent';
     let coupon = null;
     if (couponCode) {
       if (!customerId) {
         return res.status(400).json({ error: 'Inicia sesión para aplicar un cupón.' });
       }
-      // Check user personal coupons
       coupon = await dbQuery.get(
         "SELECT * FROM user_coupons WHERE user_id = ? AND LOWER(code) = ? AND used = 0",
         [customerId, couponCode.trim().toLowerCase()]
       );
-      if (coupon) {
-        discountType = 'percent';
-        discountPercent = coupon.discount_percent || 0;
-      } else {
-        // Check global coupons
-        const globalCoupon = await dbQuery.get(
-          "SELECT * FROM global_coupons WHERE LOWER(code) = ? AND active = 1",
-          [couponCode.trim().toLowerCase()]
-        );
-        if (!globalCoupon) {
-          return res.status(400).json({ error: 'El cupón no es válido o ya fue utilizado.' });
-        }
-        discountType = globalCoupon.discount_type;
-        if (discountType === 'percent') {
-          discountPercent = globalCoupon.discount_value;
-        } else {
-          discountAmount = globalCoupon.discount_value;
-        }
-        coupon = globalCoupon; // for reference
+      if (!coupon) {
+        return res.status(400).json({ error: 'El cupón no es válido o ya fue utilizado.' });
       }
+      discountPercent = coupon.discount_percent || 0;
     }
 
     // 1. Calculate secure total from DB prices (prevent client-side tampering)
@@ -595,7 +576,8 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       }
       
       const sizesArray = JSON.parse(product.sizes || '[]');
-      if (!sizesArray.includes(item.size.toString())) {
+      const isPicafresa = product.title && product.title.toLowerCase().includes('picafresa');
+      if (!isPicafresa && !sizesArray.includes(item.size.toString())) {
         return res.status(400).json({ error: `La talla ${item.size} no está disponible para ${product.title}.` });
       }
       
@@ -634,10 +616,8 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       });
     }
 
-    const discountAmount2 = discountType === 'percent'
-      ? itemsSubtotal * (discountPercent / 100)
-      : Math.min(discountAmount, itemsSubtotal);
-    let calculatedTotal = itemsSubtotal - discountAmount2;
+    const discountAmount = itemsSubtotal * (discountPercent / 100);
+    let calculatedTotal = itemsSubtotal - discountAmount;
 
     // Secure Shipping Calculation
     let selectedShippingCost = 150; // default/fallback flat shipping fee
@@ -1395,57 +1375,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 });
 
 
-/* --- ADMIN: GLOBAL COUPONS CRUD --- */
-
-// GET all global coupons
-app.get('/api/admin/coupons', authenticateAdmin, async (req, res) => {
-  try {
-    const coupons = await dbQuery.all("SELECT * FROM global_coupons ORDER BY created_at DESC");
-    res.json({ success: true, coupons });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Error al obtener los cupones.' });
-  }
-});
-
-// POST create global coupon
-app.post('/api/admin/coupons', authenticateAdmin, async (req, res) => {
-  const { code, description, discount_type, discount_value } = req.body;
-  if (!code || !discount_type || discount_value === undefined) {
-    return res.status(400).json({ error: 'Código, tipo y valor son obligatorios.' });
-  }
-  if (!['percent', 'amount'].includes(discount_type)) {
-    return res.status(400).json({ error: 'El tipo debe ser "percent" o "amount".' });
-  }
-  try {
-    await dbQuery.run(
-      "INSERT INTO global_coupons (code, description, discount_type, discount_value) VALUES (?, ?, ?, ?)",
-      [code.trim().toUpperCase(), description || '', discount_type, parseFloat(discount_value)]
-    );
-    res.json({ success: true, message: `Cupón ${code.toUpperCase()} creado correctamente.` });
-  } catch (err) {
-    if (err.message && err.message.includes('UNIQUE')) {
-      return res.status(400).json({ error: 'Ya existe un cupón con ese código.' });
-    }
-    console.error(err);
-    res.status(500).json({ error: 'Error al crear el cupón.' });
-  }
-});
-
-// DELETE global coupon
-app.delete('/api/admin/coupons/:id', authenticateAdmin, async (req, res) => {
-  const { id } = req.params;
-  try {
-    await dbQuery.run("DELETE FROM global_coupons WHERE id = ?", [id]);
-    res.json({ success: true, message: 'Cupón eliminado.' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Error al eliminar el cupón.' });
-  }
-});
-
 /* --- CUSTOMER APIS --- */
-
 
 // GET active coupons for customer
 app.get('/api/coupons', authenticateCustomer, async (req, res) => {
@@ -1458,50 +1388,31 @@ app.get('/api/coupons', authenticateCustomer, async (req, res) => {
   }
 });
 
-// POST validate coupon code (checks user_coupons AND global_coupons)
+// POST validate coupon code
 app.post('/api/coupons/validate', authenticateCustomer, async (req, res) => {
   const { code } = req.body;
   if (!code) {
     return res.status(400).json({ error: 'El código de cupón es obligatorio.' });
   }
   try {
-    // 1. Check user personal coupons first
     const dbCoupon = await dbQuery.get(
       "SELECT * FROM user_coupons WHERE user_id = ? AND LOWER(code) = ? AND used = 0",
       [req.customer.id, code.trim().toLowerCase()]
     );
-    if (dbCoupon) {
-      return res.json({
-        success: true,
-        code: dbCoupon.code,
-        description: dbCoupon.description,
-        discount_type: 'percent',
-        discount_value: dbCoupon.discount_percent,
-        discount_percent: dbCoupon.discount_percent
-      });
+    if (!dbCoupon) {
+      return res.status(400).json({ error: 'El cupón no es válido o ya fue utilizado.' });
     }
-    // 2. Check global coupons
-    const globalCoupon = await dbQuery.get(
-      "SELECT * FROM global_coupons WHERE LOWER(code) = ? AND active = 1",
-      [code.trim().toLowerCase()]
-    );
-    if (globalCoupon) {
-      return res.json({
-        success: true,
-        code: globalCoupon.code,
-        description: globalCoupon.description,
-        discount_type: globalCoupon.discount_type,
-        discount_value: globalCoupon.discount_value,
-        discount_percent: globalCoupon.discount_type === 'percent' ? globalCoupon.discount_value : 0
-      });
-    }
-    return res.status(400).json({ error: 'El cupón no es válido o ya fue utilizado.' });
+    res.json({
+      success: true,
+      code: dbCoupon.code,
+      description: dbCoupon.description,
+      discount_percent: dbCoupon.discount_percent
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al validar el cupón.' });
   }
 });
-
 
 // POST Customer Register
 app.post('/api/customer/register', async (req, res) => {
@@ -2276,19 +2187,6 @@ if (!process.env.VERCEL) {
 
   // Also run once on startup after 5 seconds to verify it works and sync initial data
   setTimeout(runHourlySync, 5000);
-
-  // Create global_coupons table if it doesn't exist
-  dbQuery.run(`
-    CREATE TABLE IF NOT EXISTS global_coupons (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      code TEXT NOT NULL UNIQUE,
-      description TEXT,
-      discount_type TEXT NOT NULL DEFAULT 'percent',
-      discount_value REAL NOT NULL DEFAULT 0,
-      active INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `).catch(e => console.error('Error creating global_coupons table:', e.message));
 
   // Start server
   app.listen(PORT, () => {
