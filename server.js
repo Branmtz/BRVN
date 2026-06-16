@@ -1806,7 +1806,7 @@ app.get('/api/admin/analytics', authenticateAdmin, async (req, res) => {
     
     // 3. Gender/Category Analysis
     const orderRows = await dbQuery.all("SELECT items FROM orders WHERE status != 'pending'");
-    const genderStats = { 'Caballero': 0, 'Dama': 0, 'Niños': 0, 'Unisex': 0 };
+    const genderStats = { 'Hombre': 0, 'Mujer': 0, 'Niños': 0, 'Unisex': 0 };
     
     for (const row of orderRows) {
       try {
@@ -1814,7 +1814,9 @@ app.get('/api/admin/analytics', authenticateAdmin, async (req, res) => {
         for (const item of items) {
           // Look up product category
           const prod = await dbQuery.get("SELECT gender FROM products WHERE sku = ?", [item.sku]);
-          const itemGender = prod ? prod.gender : 'Unisex';
+          let itemGender = prod ? prod.gender : 'Unisex';
+          if (itemGender === 'Caballero') itemGender = 'Hombre';
+          if (itemGender === 'Dama') itemGender = 'Mujer';
           genderStats[itemGender] = (genderStats[itemGender] || 0) + item.qty;
         }
       } catch (e) {

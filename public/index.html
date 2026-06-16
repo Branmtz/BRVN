@@ -169,6 +169,7 @@
       <!-- Navigation Icons -->
       <div class="nav-icons">
         <a href="javascript:void(0)" onclick="switchTab('trends')" title="Los Más Vendidos" class="nav-desktop-only"><i class="fa-solid fa-fire" style="color: #ff9500;"></i></a>
+        <a href="/track.html" title="Rastrear Pedido" class="nav-desktop-only"><i class="fa-solid fa-location-dot"></i></a>
         <a href="javascript:void(0)" onclick="switchTab('menu')" title="Mi Cuenta" class="nav-desktop-only"><i class="fa-regular fa-user"></i></a>
         <a href="/cart.html" class="cart-icon nav-desktop-only" title="Carrito">
           <i class="fa-solid fa-bag-shopping"></i>
@@ -206,89 +207,81 @@
          HOME VIEW (Catalog & Filtering)
          ══════════════════════════════════════════ -->
     <div id="home-view" class="view-section active">
-      <!-- Advertising Carousel Section -->
-      <section class="hero-carousel-container" style="margin-top: 24px;">
-        <div class="carousel-track-wrapper">
-          <div class="carousel-track" id="hero-carousel-track">
-            
-            <!-- Slide 1: Menos ruido. Más estilo. -->
-            <div class="carousel-slide active">
-              <div class="slide-content">
-                <span class="slide-tag">NUEVA COLECCIÓN</span>
-                <h2>Menos ruido. Más estilo.</h2>
-                <p>Tu clóset ya los está esperando. Solo haz clic y recíbelos en casa.</p>
-                <a href="#catalog-start" class="slide-btn">Explorar Calzado</a>
-              </div>
-            </div>
-            
-            <!-- Slide 2: Oferta Especial -->
-            <div class="carousel-slide mexico-slide">
-              <div class="slide-content">
-                <span class="slide-tag">OFERTA ESPECIAL</span>
-                <h2>¡Descuento en tu Primera Compra!</h2>
-                <p>Usa el código <strong style="font-weight: 700;">VIVAMEXICO</strong> al hacer tu compra y obtén un regalo.</p>
-                <a href="#catalog-start" class="slide-btn">Ver Catálogo</a>
-              </div>
-            </div>
-
-            
-            <!-- Slide 4: Envíos Express -->
-            <div class="carousel-slide">
-              <div class="slide-content">
-                <span class="slide-tag">ENVÍOS EXPRESS</span>
-                <h2>Envíos a Todo México</h2>
-                <p>Recibe tu calzado favorito de forma rápida y segura en la puerta de tu hogar.</p>
-                <a href="#catalog-start" class="slide-btn">Explorar Calzado</a>
-              </div>
-            </div>
-            
+      <!-- Main Landing Container (Hero Banner + Category Cards) -->
+      <div id="main-landing-container">
+        <!-- Hero Banner Section -->
+        <section class="hero-banner-section">
+          <div class="hero-banner-content">
+            <h1 class="hero-banner-title">El par que buscabas, llegó.</h1>
+            <p class="hero-banner-subtext">Descubre modelos importados exclusivos. Envío express, todas las tallas.</p>
+            <a href="#categories-section-anchor" class="hero-banner-button" onclick="scrollToCategories(event)">Ver colección</a>
           </div>
-        </div>
-        
-        <!-- Navigation Arrows -->
-        <button class="carousel-arrow prev" onclick="moveCarousel(-1)">&lsaquo;</button>
-        <button class="carousel-arrow next" onclick="moveCarousel(1)">&rsaquo;</button>
-        
-        <!-- Navigation Dots -->
-        <div class="carousel-dots" id="carousel-dots-container"></div>
-      </section>
+          <div class="hero-banner-image-container">
+            <img src="/hero_banner_shoes.png" alt="El par que buscabas, llegó.">
+          </div>
+        </section>
 
-      <!-- Anchor for scrolling down -->
-      <div id="catalog-start"></div>
+        <!-- Anchor for scrolling down -->
+        <div id="categories-section-anchor" style="scroll-margin-top: 80px;"></div>
 
-      <div class="filters-bar">
-        <!-- Search Box -->
-        <div class="search-box">
-          <input type="text" id="search-input" placeholder="Buscar modelo, marca, SKU o ID..." onkeyup="searchProducts()">
-        </div>
-        
-        <!-- Dropdowns Container -->
-        <div class="dropdowns-container">
-          <!-- Gender Select -->
-          <select id="gender-select" onchange="filterByGender(this.value)" class="filter-select">
-            <option value="all">Todos los Géneros</option>
-            <option value="Caballero">Caballero</option>
-            <option value="Dama">Dama</option>
-            <option value="Niños">Niños</option>
-          </select>
+        <!-- Category Cards Section -->
+        <section class="category-cards-section">
+          <div class="category-cards-grid">
+            <!-- Card 1: Mujer -->
+            <div class="category-card-item" onclick="selectCategory('Mujeres')">
+              <img src="/category_mujer.png" alt="Mujer">
+              <div class="category-card-overlay"></div>
+              <div class="category-card-text">Mujer</div>
+            </div>
 
-          <!-- Category Select -->
-          <select id="category-select" onchange="filterByCategory(this.value)" class="filter-select">
-            <option value="all">Todas las Categorías</option>
-          </select>
+            <!-- Card 2: Hombre -->
+            <div class="category-card-item" onclick="selectCategory('Hombres')">
+              <img src="/category_hombre.png" alt="Hombre">
+              <div class="category-card-overlay"></div>
+              <div class="category-card-text">Hombre</div>
+            </div>
 
-          <!-- Brand Select -->
-          <select id="brand-select" onchange="filterByBrand(this.value)" class="filter-select">
-            <option value="all">Todas las Marcas</option>
-          </select>
-        </div>
+            <!-- Card 3: Niños -->
+            <div class="category-card-item" onclick="selectCategory('Niños')">
+              <img src="/category_ninos.png" alt="Niños">
+              <div class="category-card-overlay"></div>
+              <div class="category-card-text">Niños</div>
+            </div>
+
+            <!-- Card 4: Más vendidos -->
+            <div class="category-card-item" onclick="selectCategory('Lo más vendido')">
+              <img src="/category_trends.png" alt="Más vendidos">
+              <div class="category-card-overlay"></div>
+              <div class="category-card-text">Más vendidos</div>
+            </div>
+          </div>
+        </section>
       </div>
 
-      <!-- Product Grid -->
-      <div class="product-grid" id="product-grid">
-        <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-secondary);">
-          <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px;"></i>
-          <p>Cargando Productos...</p>
+      <!-- Category Catalog View Container (Hidden by Default) -->
+      <div id="category-catalog-container" class="category-catalog-view" style="display: none;">
+        <div class="category-catalog-header">
+          <button class="back-home-button" onclick="showMainLanding()">
+            <i class="fa-solid fa-arrow-left"></i> Volver al Inicio
+          </button>
+          <h2 id="category-catalog-title" class="category-title">Categoría</h2>
+        </div>
+
+        <div class="category-filters-bar">
+          <div class="filter-group">
+            <label for="category-brand-select" class="brand-filter-label">Filtrar por Marca:</label>
+            <select id="category-brand-select" onchange="filterCategoryByBrand(this.value)" class="filter-select">
+              <option value="all">Todas las Marcas</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Product Grid -->
+        <div class="product-grid" id="category-product-grid">
+          <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-secondary);">
+            <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px;"></i>
+            <p>Cargando Productos...</p>
+          </div>
         </div>
       </div>
     </div>
@@ -559,7 +552,6 @@
         <p>&copy; 2026 Distributed by BRVN Store. Todos los derechos reservados.</p>
       </div>
       <div class="footer-links">
-        <a href="/track.html">Rastrear Pedido</a>
         <a href="/admin.html">Administrador</a>
       </div>
     </div>

@@ -50,10 +50,10 @@ async function getBrowserInstance() {
 function normalizeGender(dept, gend) {
   const value = (dept || gend || '').toUpperCase();
   if (value.includes('CABALLERO') || value.includes('HOMBRE') || value.includes('MEN')) {
-    return 'Caballero';
+    return 'Hombre';
   }
   if (value.includes('DAMA') || value.includes('MUJER') || value.includes('WOMEN')) {
-    return 'Dama';
+    return 'Mujer';
   }
   if (value.includes('NIÑO') || value.includes('NIÑA') || value.includes('KIDS') || value.includes('INFANTIL')) {
     return 'Niños';

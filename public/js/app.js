@@ -5,6 +5,8 @@ let currentGenderFilter = 'all';
 let currentCategoryFilter = 'all';
 let currentBrandFilter = 'all';
 let currentTab = 'home';
+let currentSelectedCategory = null; // Can be 'Mujeres', 'Hombres', 'Niños', 'Lo más vendido'
+let categoryBrandFilter = 'all';
 
 // Infinite scroll state
 const PAGE_SIZE = 24;
@@ -114,42 +116,31 @@ function renderStarIcons(average) {
 
 /* --- Catalog Page Logic --- */
 async function initCatalogPage() {
-  const gridEl = document.getElementById('product-grid');
+  const gridEl = document.getElementById('category-product-grid');
   
-  // 1. Process URL params immediately to toggle active UI tab
   const params = new URLSearchParams(window.location.search);
   const tabParam = params.get('tab');
-  const genderParam = params.get('gender');
-  if (genderParam) {
-    currentGenderFilter = genderParam;
-  }
-  
-  const genderSelect = document.getElementById('gender-select');
-  if (genderSelect) {
-    genderSelect.value = currentGenderFilter;
-  }
-  
-  if (tabParam && tabParam !== 'home') {
-    switchTab(tabParam);
-  }
+  const categoryParam = params.get('category');
   
   try {
-    // 2. Fetch catalog products
+    // 1. Fetch catalog products
     const res = await fetchWithAuth('/api/products');
     if (!res.ok) throw new Error('Failed to fetch catalog');
     allProducts = await res.json();
     
-    // 3. Render catalog only if we are currently on the 'home' tab
-    if (!tabParam || tabParam === 'home') {
-      filterByGender(currentGenderFilter);
+    // 2. Route parameters handling
+    if (categoryParam) {
+      selectCategory(categoryParam);
+    } else if (tabParam === 'trends') {
+      selectCategory('Lo más vendido');
+    } else if (tabParam && tabParam !== 'home') {
+      switchTab(tabParam);
+    } else {
+      showMainLanding();
     }
-    
-    await loadBrandFilters();
-    initHeroCarousel();
   } catch (err) {
     console.error(err);
-    // Only show error on catalog grid if the user is actually on 'home' tab
-    if (gridEl && (!tabParam || tabParam === 'home')) {
+    if (gridEl) {
       gridEl.innerHTML = `
         <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: #ff3b30;">
           <i class="fa-solid fa-circle-exclamation" style="font-size: 24px; margin-bottom: 12px;"></i>
@@ -421,7 +412,26 @@ window.switchTab = function(tabName) {
     return;
   }
   
-  currentTab = tabName;
+  if (tabName === 'home') {
+    currentTab = 'home';
+    showMainLanding();
+  } else if (tabName === 'categories') {
+    currentTab = 'home'; // Show home view and scroll to categories
+    showMainLanding();
+    setTimeout(() => {
+      const target = document.getElementById('categories-section-anchor');
+      if (target) target.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+    tabName = 'home'; // Map tab display active states to home
+  } else if (tabName === 'trends') {
+    currentTab = 'home';
+    showMainLanding();
+    selectCategory('Lo más vendido');
+    tabName = 'home'; // Map active nav state to home since it's inside home
+  } else {
+    currentTab = tabName;
+  }
+  
   const tabs = ['home', 'categories', 'trends', 'menu'];
   tabs.forEach(tab => {
     const section = document.getElementById(`${tab}-view`);
@@ -431,6 +441,7 @@ window.switchTab = function(tabName) {
     if (navBtn) navBtn.classList.remove('active');
   });
   
+  // Mapped tabName might be home if categories/trends mapped to home
   const activeSection = document.getElementById(`${tabName}-view`);
   if (activeSection) activeSection.classList.add('active');
   
@@ -440,7 +451,7 @@ window.switchTab = function(tabName) {
   // Toggle mobile top filters display
   const mobileBar = document.querySelector('.mobile-search-filters');
   if (mobileBar) {
-    if (tabName === 'home' || tabName === 'trends') {
+    if (tabName === 'home' && !currentSelectedCategory) {
       mobileBar.classList.remove('hidden');
     } else {
       mobileBar.classList.add('hidden');
@@ -454,10 +465,6 @@ window.switchTab = function(tabName) {
     } else {
       showAuth();
     }
-  } else if (tabName === 'categories') {
-    renderCategoriesGrid();
-  } else if (tabName === 'trends') {
-    renderTrendsGrid();
   }
 };
 
@@ -2238,3 +2245,210 @@ function moveCarousel(direction) {
 
 // Make moveCarousel global so the inline HTML onclick works
 window.moveCarousel = moveCarousel;
+
+/* --- Category Catalog Filtering, Rendering & Navigation --- */
+let categoryBaseProducts = [];
+let categoryFilteredProducts = [];
+let categoryCurrentPage = 0;
+let categoryScrollObserver = null;
+
+window.selectCategory = function(categoryName) {
+  currentSelectedCategory = categoryName;
+  categoryBrandFilter = 'all';
+
+  // Toggle sections visibility
+  const landingContainer = document.getElementById('main-landing-container');
+  const catalogContainer = document.getElementById('category-catalog-container');
+  if (landingContainer) landingContainer.style.display = 'none';
+  if (catalogContainer) catalogContainer.style.display = 'block';
+
+  // Set category title
+  const titleEl = document.getElementById('category-catalog-title');
+  if (titleEl) titleEl.textContent = categoryName;
+
+  // Filter products matching this category
+  let baseProducts = [];
+  if (categoryName === 'Mujeres') {
+    baseProducts = allProducts.filter(p => {
+      const g = (p.gender || '').toLowerCase();
+      const c = (p.category || '').toLowerCase();
+      return g === 'mujer' || g === 'dama' || g === 'mujeres' ||
+             c.includes('mujer') || c.includes('dama') || c.includes('women');
+    });
+  } else if (categoryName === 'Hombres') {
+    baseProducts = allProducts.filter(p => {
+      const g = (p.gender || '').toLowerCase();
+      const c = (p.category || '').toLowerCase();
+      return g === 'hombre' || g === 'caballero' || g === 'hombres' ||
+             c.includes('hombre') || c.includes('caballero') || c.includes('men');
+    });
+  } else if (categoryName === 'Niños') {
+    baseProducts = allProducts.filter(p => {
+      const g = (p.gender || '').toLowerCase();
+      const c = (p.category || '').toLowerCase();
+      return g === 'niños' || g === 'niño' || g === 'niña' ||
+             c.includes('niño') || c.includes('niña') || c.includes('kids') || c.includes('infantil');
+    });
+  } else if (categoryName === 'Lo más vendido') {
+    baseProducts = allProducts.filter(p => p.is_bestseller === 1);
+  }
+
+  // Sort baseProducts so that bestsellers appear first
+  baseProducts.sort((a, b) => {
+    const aBest = (a.is_bestseller === 1 || a.is_bestseller === true || a.is_bestseller === '1') ? 1 : 0;
+    const bBest = (b.is_bestseller === 1 || b.is_bestseller === true || b.is_bestseller === '1') ? 1 : 0;
+    return bBest - aBest;
+  });
+
+  // Populate brand filter dropdown
+  const brandSelect = document.getElementById('category-brand-select');
+  if (brandSelect) {
+    const brandsSet = new Set();
+    baseProducts.forEach(p => {
+      if (p.brand) brandsSet.add(p.brand.trim());
+    });
+    const sortedBrands = Array.from(brandsSet).sort();
+    
+    let optionsHtml = '<option value="all">Todas las Marcas</option>';
+    sortedBrands.forEach(b => {
+      optionsHtml += `<option value="${b}">${b}</option>`;
+    });
+    brandSelect.innerHTML = optionsHtml;
+    brandSelect.value = 'all';
+  }
+
+  // Hide mobile search/filters bar
+  const mobileBar = document.querySelector('.mobile-search-filters');
+  if (mobileBar) mobileBar.classList.add('hidden');
+
+  // Apply filters and render
+  applyCategoryFilters(baseProducts);
+};
+
+window.showMainLanding = function() {
+  currentSelectedCategory = null;
+  categoryBrandFilter = 'all';
+
+  const landingContainer = document.getElementById('main-landing-container');
+  const catalogContainer = document.getElementById('category-catalog-container');
+  if (landingContainer) landingContainer.style.display = 'block';
+  if (catalogContainer) catalogContainer.style.display = 'none';
+
+  // Show mobile search/filters bar only if on home tab
+  const mobileBar = document.querySelector('.mobile-search-filters');
+  if (mobileBar && currentTab === 'home') {
+    mobileBar.classList.remove('hidden');
+  }
+};
+
+function applyCategoryFilters(baseProducts) {
+  if (baseProducts) {
+    categoryBaseProducts = baseProducts;
+  }
+  
+  if (categoryBrandFilter === 'all') {
+    categoryFilteredProducts = categoryBaseProducts;
+  } else {
+    categoryFilteredProducts = categoryBaseProducts.filter(p => p.brand === categoryBrandFilter);
+  }
+  
+  renderCategoryProducts();
+}
+
+window.filterCategoryByBrand = function(brand) {
+  categoryBrandFilter = brand;
+  applyCategoryFilters();
+};
+
+function renderCategoryProducts() {
+  const gridEl = document.getElementById('category-product-grid');
+  if (!gridEl) return;
+
+  categoryCurrentPage = 0;
+
+  // Remove existing sentinel
+  const oldSentinel = document.getElementById('category-scroll-sentinel');
+  if (oldSentinel) oldSentinel.remove();
+  if (categoryScrollObserver) { categoryScrollObserver.disconnect(); categoryScrollObserver = null; }
+
+  if (categoryFilteredProducts.length === 0) {
+    gridEl.innerHTML = `
+      <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-secondary);">
+        <p>No se encontraron calzados que coincidan con tu selección.</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (window.innerWidth <= 768) {
+    gridEl.innerHTML = `
+      <div class="masonry-column masonry-column-left"></div>
+      <div class="masonry-column masonry-column-right"></div>
+    `;
+  } else {
+    gridEl.innerHTML = '';
+  }
+
+  appendCategoryProductBatch();
+}
+
+function appendCategoryProductBatch() {
+  const gridEl = document.getElementById('category-product-grid');
+  if (!gridEl) return;
+
+  const start = categoryCurrentPage * PAGE_SIZE;
+  const end = start + PAGE_SIZE;
+  const batch = categoryFilteredProducts.slice(start, end);
+
+  if (batch.length === 0) return;
+
+  if (window.innerWidth <= 768) {
+    const leftCol = gridEl.querySelector('.masonry-column-left');
+    const rightCol = gridEl.querySelector('.masonry-column-right');
+    batch.forEach((p, index) => {
+      const cardHtml = buildProductCard(p);
+      if (index % 2 === 0) {
+        if (leftCol) leftCol.insertAdjacentHTML('beforeend', cardHtml);
+      } else {
+        if (rightCol) rightCol.insertAdjacentHTML('beforeend', cardHtml);
+      }
+    });
+  } else {
+    batch.forEach(p => {
+      gridEl.insertAdjacentHTML('beforeend', buildProductCard(p));
+    });
+  }
+
+  if (end < categoryFilteredProducts.length) {
+    setupCategoryScrollObserver();
+  }
+}
+
+function setupCategoryScrollObserver() {
+  const gridEl = document.getElementById('category-product-grid');
+  if (!gridEl) return;
+
+  const sentinel = document.createElement('div');
+  sentinel.id = 'category-scroll-sentinel';
+  sentinel.style.height = '10px';
+  sentinel.style.gridColumn = '1 / -1';
+  gridEl.appendChild(sentinel);
+
+  categoryScrollObserver = new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) {
+      categoryCurrentPage++;
+      sentinel.remove();
+      appendCategoryProductBatch();
+    }
+  }, { rootMargin: '200px' });
+
+  categoryScrollObserver.observe(sentinel);
+}
+
+window.scrollToCategories = function(event) {
+  if (event) event.preventDefault();
+  const target = document.getElementById('categories-section-anchor');
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth' });
+  }
+};

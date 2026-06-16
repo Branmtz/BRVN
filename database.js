@@ -163,6 +163,20 @@ async function initializeDatabase() {
       console.error('Error backfilling brand values:', err.message);
     }
 
+    // Migrate gender values 'Dama' -> 'Mujer' and 'Caballero' -> 'Hombre'
+    try {
+      const resultDama = await dbQuery.run("UPDATE products SET gender = 'Mujer' WHERE gender = 'Dama'");
+      if (resultDama.changes > 0) {
+        console.log(`Migrated ${resultDama.changes} products from gender 'Dama' to 'Mujer'.`);
+      }
+      const resultCaballero = await dbQuery.run("UPDATE products SET gender = 'Hombre' WHERE gender = 'Caballero'");
+      if (resultCaballero.changes > 0) {
+        console.log(`Migrated ${resultCaballero.changes} products from gender 'Caballero' to 'Hombre'.`);
+      }
+    } catch (e) {
+      console.error('Error migrating gender values in DB:', e.message);
+    }
+
     // 2. Create Orders Table
     await dbQuery.run(`
       CREATE TABLE IF NOT EXISTS orders (
