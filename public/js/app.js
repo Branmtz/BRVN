@@ -508,9 +508,10 @@ function renderProductDetail() {
   const p = currentProduct;
   const mainImageContainer = document.getElementById('main-image-view');
   const thumbnailsGrid = document.getElementById('thumbnails-grid');
+  const isPicafresa = p.title && p.title.toLowerCase().includes('picafresa');
   
   // Set basic info
-  document.getElementById('detail-brand').textContent = p.brand || 'Calzado';
+  document.getElementById('detail-brand').textContent = isPicafresa ? 'DULCE' : (p.brand || 'Calzado');
   document.getElementById('detail-title').textContent = p.title;
   document.getElementById('detail-price').textContent = `$${p.price.toLocaleString()} MXN`;
   
@@ -612,14 +613,32 @@ function renderProductDetail() {
     thumbnailsGrid.innerHTML = '';
   }
   
+  // Cambiar título de sección solo para Picafresa
+  const detailSectionTitles = document.querySelectorAll('.detail-section-title');
+  detailSectionTitles.forEach(el => {
+    if (el.textContent.trim().toLowerCase().includes('detalles del calzado')) {
+      el.textContent = isPicafresa ? 'Detalles del Producto' : 'Detalles del Calzado';
+    }
+  });
+
   // Render Sizes Selector
   const sizeSelector = document.getElementById('size-selector');
+  const sizeSection = sizeSelector ? sizeSelector.closest('div') : null;
   const stockIndicator = document.getElementById('size-stock-indicator');
   if (stockIndicator) {
     stockIndicator.innerHTML = '';
   }
-  
-  if (sizeSelector) {
+
+  // Ocultar selector de tallas para Picafresa
+  if (isPicafresa) {
+    if (sizeSection) sizeSection.style.display = 'none';
+    if (stockIndicator) stockIndicator.style.display = 'none';
+  } else {
+    if (sizeSection) sizeSection.style.display = '';
+    if (stockIndicator) stockIndicator.style.display = '';
+  }
+
+  if (!isPicafresa && sizeSelector) {
     if (p.sizes && p.sizes.length > 0) {
       // Deduplicate sizes to avoid duplicate selection pills
       const uniqueSizes = Array.from(new Set(p.sizes));
