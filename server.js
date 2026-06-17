@@ -275,6 +275,11 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
       }
     }
 
+    if (req.query.search) {
+      const s = `%${req.query.search.toLowerCase()}%`;
+      whereClauses.push(`(LOWER(title) LIKE '${s}' OR LOWER(brand) LIKE '${s}' OR LOWER(sku) LIKE '${s}' OR LOWER(description) LIKE '${s}')`);
+    }
+
     const where = whereClauses.join(' AND ');
 
     const products = await dbQuery.all(

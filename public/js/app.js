@@ -2648,11 +2648,9 @@ document.addEventListener('keydown', function(e) {
 
 
 window.executeGlobalSearch = async function(query) {
-  await ensureProductsLoaded();
   currentSelectedCategory = 'Búsqueda';
   categoryBrandFilter = 'all';
 
-  // Make sure we are on the Home view tab
   const path = window.location.pathname;
   const isIndex = path === '/' || path.includes('index.html') || path === '';
   if (!isIndex) {
@@ -2675,45 +2673,42 @@ window.executeGlobalSearch = async function(query) {
   const titleEl = document.getElementById('category-catalog-title');
   if (titleEl) titleEl.textContent = `Búsqueda: "${query}"`;
 
-  // Filter products by search query
-  const queryLower = query.toLowerCase().trim();
-  const baseProducts = allProducts.filter(p => {
-    return p.title.toLowerCase().includes(queryLower) ||
-           (p.description && p.description.toLowerCase().includes(queryLower)) ||
-           (p.brand && p.brand.toLowerCase().includes(queryLower)) ||
-           (p.sku && p.sku.toLowerCase().includes(queryLower)) ||
-           (p.id && String(p.id).toLowerCase().includes(queryLower));
-  });
-
-  // Sort baseProducts so that bestsellers appear first
-  baseProducts.sort((a, b) => {
-    const aBest = (a.is_bestseller === 1 || a.is_bestseller === true || a.is_bestseller === '1') ? 1 : 0;
-    const bBest = (b.is_bestseller === 1 || b.is_bestseller === true || b.is_bestseller === '1') ? 1 : 0;
-    return bBest - aBest;
-  });
-
-  // Populate brand filter dropdown
-  const brandSelect = document.getElementById('category-brand-select');
-  if (brandSelect) {
-    const brandsSet = new Set();
-    baseProducts.forEach(p => {
-      if (p.brand) brandsSet.add(p.brand.trim());
-    });
-    const sortedBrands = Array.from(brandsSet).sort();
-    
-    let optionsHtml = '<option value="all">Todas las Marcas</option>';
-    sortedBrands.forEach(b => {
-      optionsHtml += `<option value="${b}">${b}</option>`;
-    });
-    brandSelect.innerHTML = optionsHtml;
-    brandSelect.value = 'all';
-  }
+  // Show loading
+  const gridEl = document.getElementById('category-product-grid');
+  if (gridEl) gridEl.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px;color:var(--text-secondary);"><i class="fa-solid fa-spinner fa-spin" style="font-size:24px;margin-bottom:12px;"></i><p>Buscando...</p></div>`;
 
   // Hide mobile search/filters bar
   const mobileBar = document.querySelector('.mobile-search-filters');
   if (mobileBar) mobileBar.classList.add('hidden');
 
-  applyCategoryFilters(baseProducts);
+  try {
+    const res = await fetchWithAuth(`/api/products?search=${encodeURIComponent(query)}&limit=48&page=0`);
+    if (!res.ok) throw new Error('Search failed');
+    const data = await res.json();
+    const baseProducts = Array.isArray(data) ? data : (data.products || []);
+
+    baseProducts.sort((a, b) => {
+      const aBest = (a.is_bestseller === 1 || a.is_bestseller === true || a.is_bestseller === '1') ? 1 : 0;
+      const bBest = (b.is_bestseller === 1 || b.is_bestseller === true || b.is_bestseller === '1') ? 1 : 0;
+      return bBest - aBest;
+    });
+
+    const brandSelect = document.getElementById('category-brand-select');
+    if (brandSelect) {
+      const brandsSet = new Set();
+      baseProducts.forEach(p => { if (p.brand) brandsSet.add(p.brand.trim()); });
+      const sortedBrands = Array.from(brandsSet).sort();
+      let optionsHtml = '<option value="all">Todas las Marcas</option>';
+      sortedBrands.forEach(b => { optionsHtml += `<option value="${b}">${b}</option>`; });
+      brandSelect.innerHTML = optionsHtml;
+      brandSelect.value = 'all';
+    }
+
+    applyCategoryFilters(baseProducts);
+  } catch (err) {
+    console.error(err);
+    if (gridEl) gridEl.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:48px;color:#ff3b30;"><p>Error al buscar productos.</p></div>`;
+  }
 };
 
 window.handleMobileSheetSearch = function(event) {
