@@ -261,28 +261,29 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
     const { gender, page = 0, limit = 24 } = req.query;
     const offset = parseInt(page) * parseInt(limit);
 
-    // Build WHERE clause
-    let where = "status = 'active'";
+    // Build WHERE clause with proper params array
+    let whereClauses = ["status = 'active'"];
     const params = [];
 
     if (gender && gender !== 'all') {
       if (gender === 'Hombres') {
-        where += " AND (LOWER(gender) IN ('hombre','caballero','hombres') OR LOWER(category) LIKE '%hombre%' OR LOWER(category) LIKE '%caballero%')";
+        whereClauses.push("(LOWER(gender) IN ('hombre','caballero','hombres') OR LOWER(category) LIKE '%hombre%' OR LOWER(category) LIKE '%caballero%')");
       } else if (gender === 'Mujeres') {
-        where += " AND (LOWER(gender) IN ('mujer','dama','mujeres') OR LOWER(category) LIKE '%mujer%' OR LOWER(category) LIKE '%dama%')";
+        whereClauses.push("(LOWER(gender) IN ('mujer','dama','mujeres') OR LOWER(category) LIKE '%mujer%' OR LOWER(category) LIKE '%dama%')");
       } else if (gender === 'Niños') {
-        where += " AND (LOWER(gender) IN ('niños','niño','niña') OR LOWER(category) LIKE '%ni%o%' OR LOWER(category) LIKE '%kids%' OR LOWER(category) LIKE '%infantil%')";
+        whereClauses.push("(LOWER(gender) IN ('ninos','nino','nina','niños','niño','niña') OR LOWER(category) LIKE '%nino%' OR LOWER(category) LIKE '%kids%' OR LOWER(category) LIKE '%infantil%')");
       }
     }
 
+    const where = whereClauses.join(' AND ');
+
     const products = await dbQuery.all(
       `SELECT * FROM products WHERE ${where} ORDER BY is_bestseller DESC, id DESC LIMIT ? OFFSET ?`,
-      [...params, parseInt(limit), offset]
+      [parseInt(limit), offset]
     );
 
     const totalRow = await dbQuery.get(
-      `SELECT COUNT(*) as total FROM products WHERE ${where}`,
-      params
+      `SELECT COUNT(*) as total FROM products WHERE ${where}`
     );
 
     // Fetch average ratings only for this batch
