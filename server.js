@@ -258,40 +258,80 @@ app.post('/api/shipping/quote', async (req, res) => {
 // GET Catalog of active products
 app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
   try {
-    const products = await dbQuery.all("SELECT * FROM products WHERE status = 'active'");
-    
-    // Fetch average ratings
-    const ratingsData = await dbQuery.all("SELECT product_id, AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings GROUP BY product_id");
-    const ratingsMap = {};
-    ratingsData.forEach(r => {
-      ratingsMap[r.product_id] = {
-        average: r.avgRating ? parseFloat(r.avgRating.toFixed(1)) : 0,
-        count: r.countRating || 0
-      };
-    });
+    const { gender, page = 0, limit = 24 } = req.query;
+    const offset = parseInt(page) * parseInt(limit);
+
+    // Build WHERE clause
+    let where = "status = 'active'";
+    const params = [];
+
+    if (gender && gender !== 'all') {
+      if (gender === 'Hombres') {
+        where += " AND (LOWER(gender) IN ('hombre','caballero','hombres') OR LOWER(category) LIKE '%hombre%' OR LOWER(category) LIKE '%caballero%')";
+      } else if (gender === 'Mujeres') {
+        where += " AND (LOWER(gender) IN ('mujer','dama','mujeres') OR LOWER(category) LIKE '%mujer%' OR LOWER(category) LIKE '%dama%')";
+      } else if (gender === 'Niños') {
+        where += " AND (LOWER(gender) IN ('niños','niño','niña') OR LOWER(category) LIKE '%ni%o%' OR LOWER(category) LIKE '%kids%' OR LOWER(category) LIKE '%infantil%')";
+      }
+    }
+
+    const products = await dbQuery.all(
+      `SELECT * FROM products WHERE ${where} ORDER BY is_bestseller DESC, id DESC LIMIT ? OFFSET ?`,
+      [...params, parseInt(limit), offset]
+    );
+
+    const totalRow = await dbQuery.get(
+      `SELECT COUNT(*) as total FROM products WHERE ${where}`,
+      params
+    );
+
+    // Fetch average ratings only for this batch
+    const productIds = products.map(p => p.id);
+    let ratingsMap = {};
+    if (productIds.length > 0) {
+      const placeholders = productIds.map(() => '?').join(',');
+      const ratingsData = await dbQuery.all(
+        `SELECT product_id, AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings WHERE product_id IN (${placeholders}) GROUP BY product_id`,
+        productIds
+      );
+      ratingsData.forEach(r => {
+        ratingsMap[r.product_id] = {
+          average: r.avgRating ? parseFloat(r.avgRating.toFixed(1)) : 0,
+          count: r.countRating || 0
+        };
+      });
+    }
 
     // Fetch favorites if customer is logged in
     const customerId = req.customer ? req.customer.id : null;
     const favoriteIds = new Set();
-    if (customerId) {
-      const favs = await dbQuery.all("SELECT product_id FROM favorites WHERE customer_id = ?", [customerId]);
+    if (customerId && productIds.length > 0) {
+      const placeholders = productIds.map(() => '?').join(',');
+      const favs = await dbQuery.all(
+        `SELECT product_id FROM favorites WHERE customer_id = ? AND product_id IN (${placeholders})`,
+        [customerId, ...productIds]
+      );
       favs.forEach(f => favoriteIds.add(f.product_id));
     }
 
-    // Map dynamic customer price in real time
-    const mappedProducts = products.map(p => {
-      const currentPrice = calculatePrice(p.supplier_price);
-      return {
-        ...p,
-        price: currentPrice,
-        images: JSON.parse(p.images || '[]'),
-        sizes: JSON.parse(p.sizes || '[]'),
-        isFavorite: customerId ? favoriteIds.has(p.id) : false,
-        rating: ratingsMap[p.id] || { average: 0, count: 0 }
-      };
+    const mappedProducts = products.map(p => ({
+      ...p,
+      price: calculatePrice(p.supplier_price),
+      images: JSON.parse(p.images || '[]'),
+      sizes: JSON.parse(p.sizes || '[]'),
+      isFavorite: customerId ? favoriteIds.has(p.id) : false,
+      rating: ratingsMap[p.id] || { average: 0, count: 0 }
+    }));
+
+    res.json({
+      products: mappedProducts,
+      total: totalRow.total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      hasMore: offset + products.length < totalRow.total
     });
-    res.json(mappedProducts);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Error al obtener el catálogo de productos.' });
   }
 });

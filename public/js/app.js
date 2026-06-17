@@ -124,10 +124,11 @@ async function initCatalogPage() {
   const searchParam = params.get('search');
   
   try {
-    // 1. Fetch catalog products
-    const res = await fetchWithAuth('/api/products');
+    // 1. Fetch catalog products (first page only)
+    const res = await fetchWithAuth('/api/products?limit=24&page=0');
     if (!res.ok) throw new Error('Failed to fetch catalog');
-    allProducts = await res.json();
+    const data = await res.json();
+    allProducts = Array.isArray(data) ? data : (data.products || []);
     
     // 2. Route parameters handling
     if (searchParam) {
@@ -2275,13 +2276,13 @@ let _productsLoadPromise = null;
 async function ensureProductsLoaded() {
   if (allProducts.length > 0) return;
   if (_productsLoadPromise) return _productsLoadPromise;
-  _productsLoadPromise = fetchWithAuth('/api/products')
+  _productsLoadPromise = fetchWithAuth('/api/products?limit=24&page=0')
     .then(res => {
       if (!res.ok) throw new Error('Failed to fetch catalog');
       return res.json();
     })
     .then(data => {
-      allProducts = data;
+      allProducts = Array.isArray(data) ? data : (data.products || []);
       _productsLoadPromise = null;
     })
     .catch(err => {
@@ -2292,7 +2293,153 @@ async function ensureProductsLoaded() {
 }
 
 window.selectCategory = async function(categoryName) {
-  await ensureProductsLoaded();
+  currentSelectedCategory = categoryName;
+  categoryBrandFilter = 'all';
+  categoryCurrentPage = 0;
+
+  // Toggle sections visibility
+  const landingContainer = document.getElementById('main-landing-container');
+  const catalogContainer = document.getElementById('category-catalog-container');
+  if (landingContainer) landingContainer.style.display = 'none';
+  if (catalogContainer) catalogContainer.style.display = 'block';
+
+  // Set category title
+  const titleEl = document.getElementById('category-catalog-title');
+  if (titleEl) titleEl.textContent = categoryName;
+
+  // Hide mobile search/filters bar
+  const mobileBar = document.querySelector('.mobile-search-filters');
+  if (mobileBar) mobileBar.classList.add('hidden');
+
+  // Show loading state immediately
+  const gridEl = document.getElementById('category-product-grid');
+  if (gridEl) {
+    gridEl.innerHTML = `
+      <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-secondary);">
+        <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px;"></i>
+        <p>Cargando productos...</p>
+      </div>
+    `;
+  }
+
+  // Map category name to gender param for API
+  const genderMap = {
+    'Mujeres': 'Mujeres',
+    'Hombres': 'Hombres',
+    'Niños': 'Niños'
+  };
+  const genderParam = genderMap[categoryName];
+
+  try {
+    let url = '/api/products?limit=24&page=0';
+    if (genderParam) url += `&gender=${encodeURIComponent(genderParam)}`;
+
+    const res = await fetchWithAuth(url);
+    if (!res.ok) throw new Error('Failed to fetch');
+    const data = await res.json();
+
+    // Handle both old array response and new paginated response
+    let products = Array.isArray(data) ? data : (data.products || []);
+    const hasMore = Array.isArray(data) ? false : (data.hasMore || false);
+    const total = Array.isArray(data) ? products.length : (data.total || products.length);
+
+    // For "Lo más vendido" fall back to local filter
+    if (categoryName === 'Lo más vendido') {
+      await ensureProductsLoaded();
+      products = allProducts.filter(p => p.is_bestseller === 1 || p.is_bestseller === '1' || p.is_bestseller === true);
+    }
+
+    // Sort bestsellers first
+    products.sort((a, b) => {
+      const aBest = (a.is_bestseller === 1 || a.is_bestseller === true || a.is_bestseller === '1') ? 1 : 0;
+      const bBest = (b.is_bestseller === 1 || b.is_bestseller === true || b.is_bestseller === '1') ? 1 : 0;
+      return bBest - aBest;
+    });
+
+    // Store for brand filtering
+    categoryBaseProducts = products;
+    categoryFilteredProducts = products;
+
+    // Populate brand filter dropdown
+    const brandSelect = document.getElementById('category-brand-select');
+    if (brandSelect) {
+      const brandsSet = new Set();
+      products.forEach(p => { if (p.brand) brandsSet.add(p.brand.trim()); });
+      const sortedBrands = Array.from(brandsSet).sort();
+      let optionsHtml = '<option value="all">Todas las Marcas</option>';
+      sortedBrands.forEach(b => { optionsHtml += `<option value="${b}">${b}</option>`; });
+      brandSelect.innerHTML = optionsHtml;
+      brandSelect.value = 'all';
+    }
+
+    // Render
+    renderCategoryProducts();
+
+    // Setup infinite scroll to load more pages from server
+    if (hasMore && genderParam) {
+      setupServerPaginationObserver(genderParam, 1, total);
+    }
+
+  } catch (err) {
+    console.error(err);
+    if (gridEl) {
+      gridEl.innerHTML = `
+        <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: #ff3b30;">
+          <p>Error al cargar productos. Intenta de nuevo.</p>
+        </div>
+      `;
+    }
+  }
+};
+
+// Infinite scroll that loads next pages from the server
+function setupServerPaginationObserver(genderParam, nextPage, total) {
+  const gridEl = document.getElementById('category-product-grid');
+  if (!gridEl) return;
+
+  const oldSentinel = document.getElementById('category-scroll-sentinel');
+  if (oldSentinel) oldSentinel.remove();
+  if (categoryScrollObserver) { categoryScrollObserver.disconnect(); categoryScrollObserver = null; }
+
+  if (categoryBaseProducts.length >= total) return;
+
+  const sentinel = document.createElement('div');
+  sentinel.id = 'category-scroll-sentinel';
+  sentinel.style.cssText = 'grid-column:1/-1; height:60px; display:flex; align-items:center; justify-content:center;';
+  sentinel.innerHTML = '<span style="font-size:12px;color:#aaa;">Cargando más...</span>';
+  gridEl.appendChild(sentinel);
+
+  categoryScrollObserver = new IntersectionObserver(async (entries) => {
+    if (!entries[0].isIntersecting) return;
+    categoryScrollObserver.disconnect();
+    sentinel.remove();
+
+    try {
+      const res = await fetchWithAuth(`/api/products?limit=24&page=${nextPage}&gender=${encodeURIComponent(genderParam)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const newProducts = Array.isArray(data) ? data : (data.products || []);
+      const hasMore = Array.isArray(data) ? false : (data.hasMore || false);
+
+      // Append to base products
+      categoryBaseProducts = [...categoryBaseProducts, ...newProducts];
+      categoryFilteredProducts = categoryBrandFilter === 'all'
+        ? categoryBaseProducts
+        : categoryBaseProducts.filter(p => p.brand === categoryBrandFilter);
+
+      // Append new batch to grid
+      appendCategoryProductBatch();
+
+      if (hasMore) {
+        setupServerPaginationObserver(genderParam, nextPage + 1, total);
+      }
+    } catch (err) {
+      console.error('[Server pagination error]', err);
+    }
+  }, { rootMargin: '300px' });
+
+  categoryScrollObserver.observe(sentinel);
+}
   currentSelectedCategory = categoryName;
   categoryBrandFilter = 'all';
 
