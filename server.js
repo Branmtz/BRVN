@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { dbQuery } = require('./database');
 const { runScraper, verifyLiveStock, syncSingleProductLive } = require('./scraper');
+const { MercadoPagoConfig, Preference } = require('mercadopago');
 require('dotenv').config();
 
 const app = express();
@@ -697,7 +698,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       });
     }
     
-    // 4. Create Mercado Pago Preference
+    // 4. Create Mercado Pago Preference using the official SDK
     const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
     const isMock = !mpToken || mpToken.startsWith('TEST-xxx');
     
@@ -709,33 +710,34 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
         checkoutUrl: `/simulated-payment.html?folio=${orderFolio}&total=${calculatedTotal}`
       });
     }
-    
-    // Call Mercado Pago API
+
+    // Initialize MP SDK with production access token
+    const mpClient = new MercadoPagoConfig({
+      accessToken: mpToken,
+      options: { timeout: 10000 }
+    });
+    const preferenceClient = new Preference(mpClient);
+
+    // Build base URL for back_urls
     const host = req.get('host');
     let baseUrl = `${req.protocol}://${host}`;
-    
-    // Mercado Pago does not allow localhost or local IPs in back_urls.
-    // If running locally, we check if PUBLIC_URL is defined in .env, otherwise fallback to a dummy public URL.
+
+    // MP does not allow localhost in back_urls — use PUBLIC_URL or fallback
     if (host.includes('localhost') || host.includes('127.0.0.1') || host.startsWith('192.168.')) {
-      if (process.env.PUBLIC_URL) {
-        baseUrl = process.env.PUBLIC_URL;
-      } else {
-        console.warn('[Mercado Pago] Local host detected. Mercado Pago does not allow localhost in back_urls. Falling back to a dummy public URL (https://brvn-store.com). To test redirects locally, please set PUBLIC_URL in your .env (e.g. using ngrok).');
-        baseUrl = 'https://brvn-store.com';
-      }
+      baseUrl = process.env.PUBLIC_URL || 'https://brvn.com.mx';
+      console.warn(`[Mercado Pago] Local host detected — using baseUrl: ${baseUrl}`);
     }
 
-    const preferenceData = {
+    const preferenceBody = {
       items: [
         ...finalItems.map(i => ({
           id: String(i.id),
           title: `${i.title} (Talla: ${i.size}, Color: ${i.color})`,
           quantity: i.qty,
-          // Ensure unit_price is a valid positive number with max 2 decimals
           unit_price: parseFloat((Math.max(i.price, 0.01)).toFixed(2)),
           currency_id: 'MXN'
         })),
-        // Include shipping cost as a separate line item so MP totals match
+        // Include shipping as a separate line item so MP totals match
         ...(selectedShippingCost > 0 ? [{
           id: 'SHIPPING',
           title: `Envío - ${finalCarrierName}`,
@@ -747,9 +749,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       payer: {
         name: customerName,
         email: customerEmail,
-        phone: {
-          number: customerPhone.replace(/\D/g, '')
-        }
+        phone: { number: customerPhone.replace(/\D/g, '') }
       },
       back_urls: {
         success: `${baseUrl}/checkout-result.html?status=success&folio=${orderFolio}`,
@@ -761,39 +761,28 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       notification_url: `${baseUrl}/api/webhooks/mercadopago`
     };
 
-    // Diagnostic logging — helps spot invalid back_urls / notification_url
-    console.log('[Mercado Pago] Sending preference for folio:', orderFolio);
-    console.log('[Mercado Pago] baseUrl:', baseUrl);
-    console.log('[Mercado Pago] back_urls:', JSON.stringify(preferenceData.back_urls));
-    console.log('[Mercado Pago] notification_url:', preferenceData.notification_url);
-    console.log('[Mercado Pago] items:', JSON.stringify(preferenceData.items));
-    
-    const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${mpToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(preferenceData)
-    });
-    
-    const prefResult = await mpResponse.json();
-    if (mpResponse.ok && prefResult.init_point) {
-      // Save MP Preference ID in orders DB
-      await dbQuery.run("UPDATE orders SET mp_preference_id = ? WHERE id = ?", [prefResult.id, orderFolio]);
-      
-      res.json({
-        folio: orderFolio,
-        checkoutUrl: prefResult.init_point
-      });
-    } else {
-      // Surface the real MP error details to ease debugging
-      const mpStatus = mpResponse.status;
-      const mpMessage = prefResult.message || prefResult.error || JSON.stringify(prefResult);
-      console.error(`[Mercado Pago] Error ${mpStatus} for folio ${orderFolio}:`, prefResult);
-      res.status(500).json({
-        error: `Error al contactar con la pasarela de pagos (${mpStatus}): ${mpMessage}`
-      });
+    console.log('[Mercado Pago SDK] Creating preference for folio:', orderFolio);
+    console.log('[Mercado Pago SDK] baseUrl:', baseUrl);
+    console.log('[Mercado Pago SDK] items:', JSON.stringify(preferenceBody.items));
+
+    try {
+      const prefResult = await preferenceClient.create({ body: preferenceBody });
+
+      if (prefResult.init_point) {
+        await dbQuery.run("UPDATE orders SET mp_preference_id = ? WHERE id = ?", [prefResult.id, orderFolio]);
+        console.log(`[Mercado Pago SDK] Preference created OK. init_point: ${prefResult.init_point}`);
+        return res.json({
+          folio: orderFolio,
+          checkoutUrl: prefResult.init_point
+        });
+      } else {
+        console.error('[Mercado Pago SDK] No init_point in response:', prefResult);
+        return res.status(500).json({ error: 'La pasarela de pagos no devolvió un enlace de pago válido.' });
+      }
+    } catch (mpErr) {
+      console.error('[Mercado Pago SDK] Error creating preference:', mpErr);
+      const mpMessage = mpErr.message || JSON.stringify(mpErr);
+      return res.status(500).json({ error: `Error al crear preferencia de pago: ${mpMessage}` });
     }
     
   } catch (err) {
