@@ -623,7 +623,11 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     let selectedShippingCost = 150; // default/fallback flat shipping fee
     let finalCarrierName = 'Envío Estándar';
     
-    if (shippingCarrier) {
+    if (shippingCarrier === 'Recoger personalmente') {
+      // Personal pickup: zero shipping cost, no Skydropx query needed
+      selectedShippingCost = 0;
+      finalCarrierName = 'Recoger personalmente';
+    } else if (shippingCarrier) {
       try {
         const cpMatch = shippingAddress.match(/C\.P\.\s*(\d{5})/i) || shippingAddress.match(/\b\d{5}\b/);
         const zip_to = cpMatch ? cpMatch[1] || cpMatch[0] : null;
@@ -722,13 +726,24 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     }
 
     const preferenceData = {
-      items: finalItems.map(i => ({
-        id: i.id,
-        title: `${i.title} (Talla: ${i.size}, Color: ${i.color})`,
-        quantity: i.qty,
-        unit_price: i.price,
-        currency_id: 'MXN'
-      })),
+      items: [
+        ...finalItems.map(i => ({
+          id: String(i.id),
+          title: `${i.title} (Talla: ${i.size}, Color: ${i.color})`,
+          quantity: i.qty,
+          // Ensure unit_price is a valid positive number with max 2 decimals
+          unit_price: parseFloat((Math.max(i.price, 0.01)).toFixed(2)),
+          currency_id: 'MXN'
+        })),
+        // Include shipping cost as a separate line item so MP totals match
+        ...(selectedShippingCost > 0 ? [{
+          id: 'SHIPPING',
+          title: `Envío - ${finalCarrierName}`,
+          quantity: 1,
+          unit_price: parseFloat(selectedShippingCost.toFixed(2)),
+          currency_id: 'MXN'
+        }] : [])
+      ],
       payer: {
         name: customerName,
         email: customerEmail,
@@ -745,6 +760,13 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       external_reference: orderFolio,
       notification_url: `${baseUrl}/api/webhooks/mercadopago`
     };
+
+    // Diagnostic logging — helps spot invalid back_urls / notification_url
+    console.log('[Mercado Pago] Sending preference for folio:', orderFolio);
+    console.log('[Mercado Pago] baseUrl:', baseUrl);
+    console.log('[Mercado Pago] back_urls:', JSON.stringify(preferenceData.back_urls));
+    console.log('[Mercado Pago] notification_url:', preferenceData.notification_url);
+    console.log('[Mercado Pago] items:', JSON.stringify(preferenceData.items));
     
     const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
@@ -765,8 +787,13 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
         checkoutUrl: prefResult.init_point
       });
     } else {
-      console.error('Mercado Pago Error:', prefResult);
-      res.status(500).json({ error: 'Error al contactar con la pasarela de pagos.' });
+      // Surface the real MP error details to ease debugging
+      const mpStatus = mpResponse.status;
+      const mpMessage = prefResult.message || prefResult.error || JSON.stringify(prefResult);
+      console.error(`[Mercado Pago] Error ${mpStatus} for folio ${orderFolio}:`, prefResult);
+      res.status(500).json({
+        error: `Error al contactar con la pasarela de pagos (${mpStatus}): ${mpMessage}`
+      });
     }
     
   } catch (err) {
@@ -2181,18 +2208,20 @@ async function runHourlySync() {
   console.log('=== Hourly Background Sync Completed ===\n');
 }
 
-// Schedule hourly sync only if not running on Vercel
-if (!process.env.VERCEL) {
+// Schedule hourly sync only if running locally (not on Vercel or Render)
+const isCloudHosted = process.env.VERCEL || process.env.RENDER;
+
+if (!isCloudHosted) {
   setInterval(runHourlySync, 3600000); // 1 hour in ms
 
   // Also run once on startup after 5 seconds to verify it works and sync initial data
   setTimeout(runHourlySync, 5000);
-
-  // Start server
-  app.listen(PORT, () => {
-    console.log(`PAPS store server running securely at http://localhost:${PORT}`);
-  });
 }
+
+// Start server (always, regardless of cloud/local)
+app.listen(PORT, () => {
+  console.log(`PAPS store server running securely at http://localhost:${PORT}`);
+});
 
 // Export the Express app for Vercel Serverless Functions
 module.exports = app;

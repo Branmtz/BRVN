@@ -346,7 +346,11 @@ async function loadOrdersTable() {
         <tr>
           <td><strong>${order.id}</strong><br><span style="font-size:11px; color:var(--text-secondary)">${date.toLocaleDateString()}</span></td>
           <td><strong>${order.customer_name}</strong></td>
-          <td style="font-size:12px;">${order.customer_email}<br>${order.customer_phone}</td>
+          <td style="font-size:12px;">
+            <span style="font-weight:600;">${order.customer_name}</span><br>
+            <a href="mailto:${order.customer_email}">${order.customer_email}</a><br>
+            <a href="tel:${order.customer_phone || ''}" style="color:#007aff;font-weight:600;">📞 ${order.customer_phone || 'Sin número'}</a>
+          </td>
           <td>${itemsHtml}</td>
           <td><strong>$${order.total.toLocaleString()} MXN</strong></td>
           <td>${statusBadge}</td>
@@ -531,7 +535,11 @@ async function loadAbandonedTable() {
         <tr>
           <td><strong>${cart.id}</strong></td>
           <td><strong>${cart.customer_name}</strong></td>
-          <td style="font-size:12px;">${cart.customer_email}<br>${cart.customer_phone}</td>
+          <td style="font-size:12px;">
+            <span style="font-weight:600;">${cart.customer_name}</span><br>
+            <a href="mailto:${cart.customer_email}">${cart.customer_email}</a><br>
+            <a href="tel:${cart.customer_phone || ''}" style="color:#007aff;font-weight:600;">📞 ${cart.customer_phone || 'Sin número'}</a>
+          </td>
           <td>${itemsHtml}</td>
           <td><strong>$${cart.total.toLocaleString()} MXN</strong></td>
           <td style="font-size:12px;">${date.toLocaleDateString()} ${date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
