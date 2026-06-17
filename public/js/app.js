@@ -2437,10 +2437,15 @@ function setupServerPaginationObserver(genderParam, nextPage, total) {
       const hasMore = Array.isArray(data) ? false : (data.hasMore || false);
 
       // Append to base products
+      const alreadyRendered = categoryBaseProducts.length; // count BEFORE adding new
       categoryBaseProducts = [...categoryBaseProducts, ...newProducts];
       categoryFilteredProducts = categoryBrandFilter === 'all'
         ? categoryBaseProducts
         : categoryBaseProducts.filter(p => p.brand === categoryBrandFilter);
+
+      // Set page pointer to skip already-rendered products so appendCategoryProductBatch
+      // slices from the correct offset (not from 0 again)
+      categoryCurrentPage = Math.floor(alreadyRendered / PAGE_SIZE);
 
       // Append new batch to grid
       appendCategoryProductBatch();

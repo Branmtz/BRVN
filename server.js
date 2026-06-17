@@ -42,17 +42,18 @@ function rateLimiter(limit, windowMs) {
 
 // Helper: Calculate Dynamic Pricing
 // Si el precio del proveedor es 0, el precio de venta es 0
-// Día  (5:00 – 23:59): precio proveedor + $500
-// Noche (0:00 –  4:59): precio proveedor + $300
-// El costo de envío se cotiza por separado en checkout (Skydropx)
+// Productos propios con precio fijo (Picafresa, supplier_price < 100): precio directo
+// Fórmula: (costo + $300 ganancia + $160 envío incluido + comisión fija MP c/IVA) / (1 - % comisión MP)
 function calculatePrice(supplierPrice) {
   if (supplierPrice === 0) return 0;
-  // Productos propios con precio fijo (supplier_price < 100): se vende al mismo precio
+  // Productos propios con precio fijo (Picafresa, supplier_price < 100): precio directo
   if (supplierPrice < 100) return supplierPrice;
-  const hour = new Date().getHours(); // 0 – 23
-  const isNight = hour >= 0 && hour < 5;
-  const surcharge = isNight ? 300 : 500;
-  return supplierPrice + surcharge;
+  // Fórmula: (costo + $300 ganancia + $160 envío incluido + comisión fija MP c/IVA) / (1 - % comisión MP)
+  const sumaBase = supplierPrice + 300 + 160;
+  const comisionFijaConIva = 4.64;
+  const factorPorcentaje = 0.95952; // 1 - 0.04048
+  const precioFinal = (sumaBase + comisionFijaConIva) / factorPorcentaje;
+  return Math.round(precioFinal * 100) / 100;
 }
 
 // Helper: Send Twilio WhatsApp Message
@@ -679,42 +680,13 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     const discountAmount = itemsSubtotal * (discountPercent / 100);
     let calculatedTotal = itemsSubtotal - discountAmount;
 
-    // Secure Shipping Calculation
-    let selectedShippingCost = 150; // default/fallback flat shipping fee
-    let finalCarrierName = 'Envío Estándar';
-    
-    if (shippingCarrier) {
-      try {
-        const cpMatch = shippingAddress.match(/C\.P\.\s*(\d{5})/i) || shippingAddress.match(/\b\d{5}\b/);
-        const zip_to = cpMatch ? cpMatch[1] || cpMatch[0] : null;
-        
-        if (zip_to && /^\d{5}$/.test(zip_to)) {
-          const itemsCount = items.reduce((sum, item) => sum + parseInt(item.qty || 1), 0);
-          const quoteResult = await getShippingRates(zip_to, itemsCount);
-          
-          // Match the chosen carrier name from client to the live rates
-          const matchingRate = quoteResult.rates.find(r => {
-            const combinedName = `${r.carrier} - ${r.service}`.toLowerCase();
-            return combinedName.includes(shippingCarrier.toLowerCase()) || 
-                   shippingCarrier.toLowerCase().includes(r.carrier.toLowerCase());
-          });
-          
-          if (matchingRate) {
-            selectedShippingCost = matchingRate.total;
-            finalCarrierName = `${matchingRate.carrier} (${matchingRate.service})`;
-          } else {
-            if (quoteResult.rates && quoteResult.rates.length > 0) {
-              selectedShippingCost = quoteResult.rates[0].total;
-              finalCarrierName = `${quoteResult.rates[0].carrier} (${quoteResult.rates[0].service})`;
-            }
-          }
-        }
-      } catch (quoteErr) {
-        console.error('Error calculating shipping cost during checkout:', quoteErr);
-      }
-    }
-    
-    calculatedTotal += selectedShippingCost;
+    // Envío incluido en el precio del producto — no se suma costo adicional
+    // Solo se registra el método de entrega elegido por el cliente
+    const selectedShippingCost = 0;
+    let finalCarrierName = shippingCarrier && shippingCarrier.toLowerCase().includes('recoger')
+      ? 'Recoger en persona'
+      : (shippingCarrier || 'Envío a domicilio');
+
     calculatedTotal = Math.round(calculatedTotal * 100) / 100;
     
     // 2. Generate unique Folio
@@ -727,10 +699,12 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     const orderFolio = `BRVN-${nextNum}`;
     
     // 3. Register Order in Pending state
+    // For pickup orders, selectedShippingCost is already 0 (set in the shipping calc block above)
+    const shippingCostToSave = shippingCarrier && shippingCarrier.toLowerCase().includes('recoger') ? 0 : selectedShippingCost;
     await dbQuery.run(`
       INSERT INTO orders (
-        id, customer_name, customer_email, customer_phone, shipping_address, items, total, status, customer_id, shipping_carrier, coupon_code
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+        id, customer_name, customer_email, customer_phone, shipping_address, items, total, status, customer_id, shipping_carrier, coupon_code, shipping_cost
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
     `, [
       orderFolio,
       customerName,
@@ -741,7 +715,8 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       calculatedTotal,
       customerId,
       finalCarrierName,
-      coupon ? coupon.code : null
+      coupon ? coupon.code : null,
+      shippingCostToSave
     ]);
 
     // Bypassing payment preference creation for zero cost test checkout
@@ -753,13 +728,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       });
     }
 
-    // Pickup orders: no shipping cost, but still process payment via MP for the product price
-    if (shippingCarrier && shippingCarrier.toLowerCase().includes('recoger')) {
-      selectedShippingCost = 0;
-      finalCarrierName = 'Recoger en persona';
-      calculatedTotal = itemsSubtotal - discountAmount;
-      calculatedTotal = Math.round(calculatedTotal * 100) / 100;
-    }
+    // (Envío ya incluido en precio — no se recalcula aquí)
     
     // 4. Create Mercado Pago Preference
     const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;

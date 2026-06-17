@@ -60,7 +60,7 @@
         </div>
         <div class="summary-row">
           <span>Envío</span>
-          <span id="summary-shipping" style="color: var(--text-secondary); font-weight: 500;">Por cotizar</span>
+          <span id="summary-shipping" style="color: #16a34a; font-weight: 600;">Incluido en el precio</span>
         </div>
         
         <!-- Coupon input section -->
@@ -136,10 +136,34 @@
             <input type="text" id="client-reference" required placeholder="Ej. Portón gris, frente a parque">
           </div>
 
-          <div id="shipping-methods-wrapper" style="margin-bottom: 20px; display: none;">
-            <label style="font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 8px; display: block;">Paquetería de Envío *</label>
-            <div id="shipping-rates-list" style="display: flex; flex-direction: column; gap: 8px;">
-              <!-- Populated dynamically -->
+          <div style="margin-bottom: 20px;">
+            <label style="font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 10px; display: block;">Método de Entrega *</label>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+
+              <label class="shipping-rate-card active" id="shipping-rate-card-0" style="cursor:pointer;">
+                <input type="radio" name="shipping_rate" class="shipping-radio" value="Envío a domicilio"
+                  onchange="selectShippingRate(this, 0, 0, 'Envío a domicilio')" checked>
+                <div class="shipping-rate-details">
+                  <div class="carrier-info">
+                    <span class="carrier-name">🚚 Envío a domicilio</span>
+                    <span class="carrier-service">Lo coordinamos nosotros. Incluido en el precio</span>
+                  </div>
+                  <span class="carrier-price" style="color: #16a34a; font-weight: 700;">INCLUIDO</span>
+                </div>
+              </label>
+
+              <label class="shipping-rate-card" id="shipping-rate-card-1" style="cursor:pointer;">
+                <input type="radio" name="shipping_rate" class="shipping-radio" value="Recoger en persona"
+                  onchange="selectShippingRate(this, 1, 0, 'Recoger en persona')">
+                <div class="shipping-rate-details">
+                  <div class="carrier-info">
+                    <span class="carrier-name">🏪 Recoger en persona</span>
+                    <span class="carrier-service">Coordinamos contigo el punto de entrega</span>
+                  </div>
+                  <span class="carrier-price" style="color: #16a34a; font-weight: 700;">GRATIS</span>
+                </div>
+              </label>
+
             </div>
           </div>
           

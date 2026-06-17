@@ -265,7 +265,7 @@ async function loadOrdersTable() {
     if (orders.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 32px;">
+          <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 32px;">
             Aún no se han recibido pedidos en la tienda.
           </td>
         </tr>
@@ -282,6 +282,7 @@ async function loadOrdersTable() {
             Talla: ${item.size} &nbsp;|&nbsp; Color: ${item.color} &nbsp;|&nbsp;
             <span style="color: #e0006b;">SKU: ${item.sku || 'N/A'}</span>
             &nbsp;|&nbsp; Cant: ${item.qty}
+            &nbsp;|&nbsp; <span style="color: #34c759; font-weight: 800;">$${(item.price || 0).toLocaleString()} MXN c/u</span>
           </span>
         </div>
       `).join('');
@@ -342,6 +343,16 @@ async function loadOrdersTable() {
         actionHtml = `<span style="color: var(--text-secondary); font-size: 12px;">Sin acción</span>`;
       }
       
+      // Shipping column: carrier name + cost
+      const shippingCost = order.shipping_cost != null ? Number(order.shipping_cost) : null;
+      const isPickup = (order.shipping_carrier || '').toLowerCase().includes('recoger');
+      const carrierName = order.shipping_carrier || 'Sin definir';
+      const costLabel = isPickup
+        ? '<span style="color:#16a34a;font-weight:800;">GRATIS</span>'
+        : shippingCost != null
+          ? `<span style="font-weight:700;">$${shippingCost.toLocaleString('es-MX', {minimumFractionDigits:2})} MXN</span>`
+          : '<span style="color:var(--text-secondary);">—</span>';
+
       return `
         <tr>
           <td><strong>${order.id}</strong><br><span style="font-size:11px; color:var(--text-secondary)">${date.toLocaleDateString()}</span></td>
@@ -352,7 +363,11 @@ async function loadOrdersTable() {
             <a href="tel:${order.customer_phone || ''}" style="color:#007aff;font-weight:600;">📞 ${order.customer_phone || 'Sin número'}</a>
           </td>
           <td>${itemsHtml}</td>
-          <td><strong>$${order.total.toLocaleString()} MXN</strong></td>
+          <td><strong style="font-size:15px;">$${Number(order.total).toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2})} MXN</strong></td>
+          <td style="font-size:13px;">
+            <span style="font-weight:600;">${carrierName}</span><br>
+            ${costLabel}
+          </td>
           <td>${statusBadge}</td>
           <td>${actionHtml}</td>
         </tr>
@@ -361,7 +376,7 @@ async function loadOrdersTable() {
     
   } catch (err) {
     console.error(err);
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: #ff3b30;">Error al cargar pedidos.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: #ff3b30;">Error al cargar pedidos.</td></tr>`;
   }
 }
 
