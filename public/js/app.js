@@ -1957,6 +1957,7 @@ window.fetchShippingQuotes = async function(zip) {
     }
     
     // Render the cards
+    const pickupIdx = rates.length;
     ratesList.innerHTML = rates.map((rate, idx) => {
       const carrierCombined = `${rate.carrier} - ${rate.service}`;
       return `
@@ -1971,7 +1972,18 @@ window.fetchShippingQuotes = async function(zip) {
           </div>
         </label>
       `;
-    }).join('');
+    }).join('') + `
+      <label class="shipping-rate-card" id="shipping-rate-card-${pickupIdx}">
+        <input type="radio" name="shipping_rate" class="shipping-radio" value="Recoger en persona" onchange="selectShippingRate(this, ${pickupIdx}, 0, 'Recoger en persona')">
+        <div class="shipping-rate-details">
+          <div class="carrier-info">
+            <span class="carrier-name">🏪 Recoger en persona</span>
+            <span class="carrier-service">Coordinamos contigo la entrega</span>
+          </div>
+          <span class="carrier-price" style="color: #34c759; font-weight: 700;">GRATIS</span>
+        </div>
+      </label>
+    `;
     
     // Pre-select the first rate option automatically
     const firstRadio = ratesList.querySelector('input[name="shipping_rate"]');
