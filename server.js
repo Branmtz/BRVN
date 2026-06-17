@@ -743,7 +743,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     if (shippingCarrier && shippingCarrier.toLowerCase().includes('recoger')) {
       selectedShippingCost = 0;
       finalCarrierName = 'Recoger en persona';
-      calculatedTotal = itemsSubtotal - discountAmount2;
+      calculatedTotal = itemsSubtotal - discountAmount;
       calculatedTotal = Math.round(calculatedTotal * 100) / 100;
     }
     
