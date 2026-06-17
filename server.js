@@ -47,7 +47,8 @@ function rateLimiter(limit, windowMs) {
 // El costo de envío se cotiza por separado en checkout (Skydropx)
 function calculatePrice(supplierPrice) {
   if (supplierPrice === 0) return 0;
-  if (supplierPrice === 1) return 5;
+  // Productos propios con precio fijo (supplier_price < 100): se vende al mismo precio
+  if (supplierPrice < 100) return supplierPrice;
   const hour = new Date().getHours(); // 0 – 23
   const isNight = hour >= 0 && hour < 5;
   const surcharge = isNight ? 300 : 500;
@@ -371,10 +372,23 @@ app.get('/api/categories/detailed', authenticateAdmin, async (req, res) => {
   }
 });
 
-// GET Brands of active products
+// GET Brands of active products (optional ?gender= filter)
 app.get('/api/brands', async (req, res) => {
   try {
-    const rows = await dbQuery.all("SELECT DISTINCT brand FROM products WHERE status = 'active' AND brand IS NOT NULL ORDER BY brand ASC");
+    const { gender } = req.query;
+    let whereClause = "status = 'active' AND brand IS NOT NULL";
+
+    if (gender && gender !== 'all') {
+      if (gender === 'Hombres') {
+        whereClause += " AND (LOWER(gender) IN ('hombre','caballero','hombres') OR LOWER(category) LIKE '%hombre%' OR LOWER(category) LIKE '%caballero%')";
+      } else if (gender === 'Mujeres') {
+        whereClause += " AND (LOWER(gender) IN ('mujer','dama','mujeres') OR LOWER(category) LIKE '%mujer%' OR LOWER(category) LIKE '%dama%')";
+      } else if (gender === 'Niños') {
+        whereClause += " AND (LOWER(gender) IN ('ninos','nino','nina','niños','niño','niña') OR LOWER(category) LIKE '%nino%' OR LOWER(category) LIKE '%kids%' OR LOWER(category) LIKE '%infantil%')";
+      }
+    }
+
+    const rows = await dbQuery.all(`SELECT DISTINCT brand FROM products WHERE ${whereClause} ORDER BY brand ASC`);
     const brands = rows.map(r => r.brand);
     res.json(brands);
   } catch (err) {

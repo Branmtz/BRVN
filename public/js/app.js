@@ -1074,11 +1074,9 @@ async function handleCheckoutSubmit(e) {
   const zip = document.getElementById('client-zip').value.trim();
   const city = document.getElementById('client-city').value.trim();
   const state = document.getElementById('client-state').value.trim();
-  const company = document.getElementById('client-company').value.trim();
   const reference = document.getElementById('client-reference').value.trim();
   
-  const companyPart = company ? `, Compañía: ${company}` : '';
-  const shippingAddress = `${street} ${number}, ${neighborhood}, C.P. ${zip}, ${city}, ${state}, ${reference}${companyPart}`;
+  const shippingAddress = `${street} ${number}, ${neighborhood}, C.P. ${zip}, ${city}, ${state}, ${reference}`;
   
   const cart = JSON.parse(localStorage.getItem('paps_cart') || '[]');
   
@@ -2372,16 +2370,21 @@ window.selectCategory = async function(categoryName) {
     categoryBaseProducts = products;
     categoryFilteredProducts = products;
 
-    // Populate brand filter dropdown
+    // Populate brand filter dropdown with ALL brands for this gender (not just first page)
     const brandSelect = document.getElementById('category-brand-select');
     if (brandSelect) {
-      const brandsSet = new Set();
-      products.forEach(p => { if (p.brand) brandsSet.add(p.brand.trim()); });
-      const sortedBrands = Array.from(brandsSet).sort();
-      let optionsHtml = '<option value="all">Todas las Marcas</option>';
-      sortedBrands.forEach(b => { optionsHtml += `<option value="${b}">${b}</option>`; });
-      brandSelect.innerHTML = optionsHtml;
-      brandSelect.value = 'all';
+      try {
+        let brandsUrl = '/api/brands';
+        if (genderParam) brandsUrl += `?gender=${encodeURIComponent(genderParam)}`;
+        const brandsRes = await fetchWithAuth(brandsUrl);
+        const allBrands = brandsRes.ok ? await brandsRes.json() : [];
+        let optionsHtml = '<option value="all">Todas las Marcas</option>';
+        allBrands.forEach(b => { optionsHtml += `<option value="${b}">${b}</option>`; });
+        brandSelect.innerHTML = optionsHtml;
+        brandSelect.value = 'all';
+      } catch (brandsErr) {
+        console.error('[Brand filter error]', brandsErr);
+      }
     }
 
     // Render
@@ -2556,6 +2559,11 @@ function setupCategoryScrollObserver() {
   const gridEl = document.getElementById('category-product-grid');
   if (!gridEl) return;
 
+  // Clean up any existing observer before creating a new one
+  if (categoryScrollObserver) { categoryScrollObserver.disconnect(); categoryScrollObserver = null; }
+  const oldSentinel = document.getElementById('category-scroll-sentinel');
+  if (oldSentinel) oldSentinel.remove();
+
   const sentinel = document.createElement('div');
   sentinel.id = 'category-scroll-sentinel';
   sentinel.style.height = '10px';
@@ -2563,11 +2571,13 @@ function setupCategoryScrollObserver() {
   gridEl.appendChild(sentinel);
 
   categoryScrollObserver = new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting) {
-      categoryCurrentPage++;
-      sentinel.remove();
-      appendCategoryProductBatch();
-    }
+    if (!entries[0].isIntersecting) return;
+    // Disconnect immediately to prevent double-firing
+    categoryScrollObserver.disconnect();
+    categoryScrollObserver = null;
+    sentinel.remove();
+    categoryCurrentPage++;
+    appendCategoryProductBatch();
   }, { rootMargin: '200px' });
 
   categoryScrollObserver.observe(sentinel);
