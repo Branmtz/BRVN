@@ -11,6 +11,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'paps_default_jwt_secret_key_2026';
 
+// ── MercadoPago SDK — inicialización global con credenciales de producción ──
+const mpClient = new MercadoPagoConfig({
+  accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN,
+  options: { timeout: 10000 }
+});
+const preferenceClient = new Preference(mpClient);
+console.log('[MercadoPago SDK] Initialized. Token prefix:', (process.env.MERCADOPAGO_ACCESS_TOKEN || '').substring(0, 20) + '...');
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -710,13 +718,6 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
         checkoutUrl: `/simulated-payment.html?folio=${orderFolio}&total=${calculatedTotal}`
       });
     }
-
-    // Initialize MP SDK with production access token
-    const mpClient = new MercadoPagoConfig({
-      accessToken: mpToken,
-      options: { timeout: 10000 }
-    });
-    const preferenceClient = new Preference(mpClient);
 
     // Build base URL for back_urls
     const host = req.get('host');
