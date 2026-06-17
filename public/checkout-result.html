@@ -71,7 +71,14 @@
       const msgEl = document.getElementById('result-message');
       const actionEl = document.getElementById('action-area');
       
-      if (status === 'success') {
+      if (status === 'pickup') {
+        iconEl.innerHTML = '<i class="fa-solid fa-store" style="color: #007aff;"></i>';
+        titleEl.textContent = '¡Pedido registrado!';
+        msgEl.innerHTML = `Tu pedido ha sido registrado exitosamente.<br><br>Nos pondremos en contacto contigo por teléfono para coordinar la entrega en persona.<br><br>Conserva tu folio:<br><strong style="font-size: 18px; color:#1d1d1f; display:block; margin-top:8px;">${folio}</strong>`;
+        actionEl.innerHTML = `
+          <a href="/" class="secondary-btn" style="display: block; text-align: center; padding: 12px;">Volver a la tienda</a>
+        `;
+      } else if (status === 'success') {
         iconEl.innerHTML = '<i class="fa-solid fa-circle-check" style="color: #34c759;"></i>';
         titleEl.textContent = '¡Gracias por tu compra!';
         msgEl.innerHTML = `Tu pago ha sido aprobado correctamente por Mercado Pago.<br><br>Conserva tu folio de compra para el rastreo de tu envío:<br><strong style="font-size: 18px; color:#1d1d1f; display:block; margin-top:8px;">${folio}</strong>`;

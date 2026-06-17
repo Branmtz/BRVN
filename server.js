@@ -4,20 +4,11 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { dbQuery } = require('./database');
 const { runScraper, verifyLiveStock, syncSingleProductLive } = require('./scraper');
-const { MercadoPagoConfig, Preference } = require('mercadopago');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'paps_default_jwt_secret_key_2026';
-
-// ── MercadoPago SDK — inicialización global con credenciales de producción ──
-const mpClient = new MercadoPagoConfig({
-  accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN,
-  options: { timeout: 10000 }
-});
-const preferenceClient = new Preference(mpClient);
-console.log('[MercadoPago SDK] Initialized. Token prefix:', (process.env.MERCADOPAGO_ACCESS_TOKEN || '').substring(0, 20) + '...');
 
 // Middleware
 app.use(express.json());
@@ -632,11 +623,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     let selectedShippingCost = 150; // default/fallback flat shipping fee
     let finalCarrierName = 'Envío Estándar';
     
-    if (shippingCarrier === 'Recoger personalmente') {
-      // Personal pickup: zero shipping cost, no Skydropx query needed
-      selectedShippingCost = 0;
-      finalCarrierName = 'Recoger personalmente';
-    } else if (shippingCarrier) {
+    if (shippingCarrier) {
       try {
         const cpMatch = shippingAddress.match(/C\.P\.\s*(\d{5})/i) || shippingAddress.match(/\b\d{5}\b/);
         const zip_to = cpMatch ? cpMatch[1] || cpMatch[0] : null;
@@ -705,8 +692,16 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
         checkoutUrl: `/simulated-payment.html?folio=${orderFolio}&total=0`
       });
     }
+
+    // Pickup orders: no shipping cost, but still process payment via MP for the product price
+    if (shippingCarrier && shippingCarrier.toLowerCase().includes('recoger')) {
+      selectedShippingCost = 0;
+      finalCarrierName = 'Recoger en persona';
+      calculatedTotal = itemsSubtotal - discountAmount2;
+      calculatedTotal = Math.round(calculatedTotal * 100) / 100;
+    }
     
-    // 4. Create Mercado Pago Preference using the official SDK
+    // 4. Create Mercado Pago Preference
     const mpToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
     const isMock = !mpToken || mpToken.startsWith('TEST-xxx');
     
@@ -718,39 +713,36 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
         checkoutUrl: `/simulated-payment.html?folio=${orderFolio}&total=${calculatedTotal}`
       });
     }
-
-    // Build base URL for back_urls
+    
+    // Call Mercado Pago API
     const host = req.get('host');
-    let baseUrl = `${req.protocol}://${host}`;
-
-    // MP does not allow localhost in back_urls — use PUBLIC_URL or fallback
+    let baseUrl = process.env.PUBLIC_URL || `https://${host}`;
+    
+    // Mercado Pago does not allow localhost or local IPs in back_urls.
+    // If running locally, we check if PUBLIC_URL is defined in .env, otherwise fallback to a dummy public URL.
     if (host.includes('localhost') || host.includes('127.0.0.1') || host.startsWith('192.168.')) {
-      baseUrl = process.env.PUBLIC_URL || 'https://brvn.com.mx';
-      console.warn(`[Mercado Pago] Local host detected — using baseUrl: ${baseUrl}`);
+      if (process.env.PUBLIC_URL) {
+        baseUrl = process.env.PUBLIC_URL;
+      } else {
+        console.warn('[Mercado Pago] Local host detected. Mercado Pago does not allow localhost in back_urls. Falling back to a dummy public URL (https://brvn-store.com). To test redirects locally, please set PUBLIC_URL in your .env (e.g. using ngrok).');
+        baseUrl = 'https://brvn-store.com';
+      }
     }
 
-    const preferenceBody = {
-      items: [
-        ...finalItems.map(i => ({
-          id: String(i.id),
-          title: `${i.title} (Talla: ${i.size}, Color: ${i.color})`,
-          quantity: i.qty,
-          unit_price: parseFloat((Math.max(i.price, 0.01)).toFixed(2)),
-          currency_id: 'MXN'
-        })),
-        // Include shipping as a separate line item so MP totals match
-        ...(selectedShippingCost > 0 ? [{
-          id: 'SHIPPING',
-          title: `Envío - ${finalCarrierName}`,
-          quantity: 1,
-          unit_price: parseFloat(selectedShippingCost.toFixed(2)),
-          currency_id: 'MXN'
-        }] : [])
-      ],
+    const preferenceData = {
+      items: finalItems.map(i => ({
+        id: i.id,
+        title: `${i.title} (Talla: ${i.size}, Color: ${i.color})`,
+        quantity: i.qty,
+        unit_price: i.price,
+        currency_id: 'MXN'
+      })),
       payer: {
         name: customerName,
         email: customerEmail,
-        phone: { number: customerPhone.replace(/\D/g, '') }
+        phone: {
+          number: customerPhone.replace(/\D/g, '')
+        }
       },
       back_urls: {
         success: `${baseUrl}/checkout-result.html?status=success&folio=${orderFolio}`,
@@ -761,29 +753,28 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       external_reference: orderFolio,
       notification_url: `${baseUrl}/api/webhooks/mercadopago`
     };
-
-    console.log('[Mercado Pago SDK] Creating preference for folio:', orderFolio);
-    console.log('[Mercado Pago SDK] baseUrl:', baseUrl);
-    console.log('[Mercado Pago SDK] items:', JSON.stringify(preferenceBody.items));
-
-    try {
-      const prefResult = await preferenceClient.create({ body: preferenceBody });
-
-      if (prefResult.init_point) {
-        await dbQuery.run("UPDATE orders SET mp_preference_id = ? WHERE id = ?", [prefResult.id, orderFolio]);
-        console.log(`[Mercado Pago SDK] Preference created OK. init_point: ${prefResult.init_point}`);
-        return res.json({
-          folio: orderFolio,
-          checkoutUrl: prefResult.init_point
-        });
-      } else {
-        console.error('[Mercado Pago SDK] No init_point in response:', prefResult);
-        return res.status(500).json({ error: 'La pasarela de pagos no devolvió un enlace de pago válido.' });
-      }
-    } catch (mpErr) {
-      console.error('[Mercado Pago SDK] Error creating preference:', mpErr);
-      const mpMessage = mpErr.message || JSON.stringify(mpErr);
-      return res.status(500).json({ error: `Error al crear preferencia de pago: ${mpMessage}` });
+    
+    const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${mpToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(preferenceData)
+    });
+    
+    const prefResult = await mpResponse.json();
+    if (mpResponse.ok && prefResult.init_point) {
+      // Save MP Preference ID in orders DB
+      await dbQuery.run("UPDATE orders SET mp_preference_id = ? WHERE id = ?", [prefResult.id, orderFolio]);
+      
+      res.json({
+        folio: orderFolio,
+        checkoutUrl: prefResult.init_point
+      });
+    } else {
+      console.error('Mercado Pago Error:', prefResult);
+      res.status(500).json({ error: 'Error al contactar con la pasarela de pagos.' });
     }
     
   } catch (err) {
@@ -2198,20 +2189,18 @@ async function runHourlySync() {
   console.log('=== Hourly Background Sync Completed ===\n');
 }
 
-// Schedule hourly sync only if running locally (not on Vercel or Render)
-const isCloudHosted = process.env.VERCEL || process.env.RENDER;
-
-if (!isCloudHosted) {
+// Schedule hourly sync only if not running on Vercel
+if (!process.env.VERCEL) {
   setInterval(runHourlySync, 3600000); // 1 hour in ms
 
   // Also run once on startup after 5 seconds to verify it works and sync initial data
   setTimeout(runHourlySync, 5000);
-}
 
-// Start server (always, regardless of cloud/local)
-app.listen(PORT, () => {
-  console.log(`PAPS store server running securely at http://localhost:${PORT}`);
-});
+  // Start server
+  app.listen(PORT, () => {
+    console.log(`PAPS store server running securely at http://localhost:${PORT}`);
+  });
+}
 
 // Export the Express app for Vercel Serverless Functions
 module.exports = app;
