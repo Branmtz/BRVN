@@ -952,14 +952,6 @@ function initCartPage() {
 
   const zipInput = document.getElementById('client-zip');
   if (zipInput) {
-    // Show the shipping wrapper immediately with the pickup option visible
-    const wrapper = document.getElementById('shipping-methods-wrapper');
-    const ratesList = document.getElementById('shipping-rates-list');
-    if (wrapper && ratesList) {
-      wrapper.style.display = 'block';
-      ratesList.innerHTML = buildPickupCard();
-    }
-
     const checkZip = () => {
       const zip = zipInput.value.trim();
       if (/^\d{5}$/.test(zip)) {
@@ -971,13 +963,8 @@ function initCartPage() {
       if (/^\d{5}$/.test(zip)) {
         fetchShippingQuotes(zip);
       } else {
-        // Keep wrapper visible but restore only the pickup card
         const wrapper = document.getElementById('shipping-methods-wrapper');
-        const ratesList = document.getElementById('shipping-rates-list');
-        if (wrapper && ratesList) {
-          wrapper.style.display = 'block';
-          ratesList.innerHTML = buildPickupCard();
-        }
+        if (wrapper) wrapper.style.display = 'none';
         resetShippingChoice();
       }
     });
@@ -1069,73 +1056,43 @@ async function checkAndPrefillCartForm() {
 }
 
 // Handle Checkout Form Submission
-// Helper: display an inline error in the checkout error box
-function showCheckoutError(msg) {
-  const errorBox = document.getElementById('checkout-error');
-  if (errorBox) {
-    errorBox.textContent = msg;
-    errorBox.style.display = 'block';
-    errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  } else {
-    alert(msg);
-  }
-}
-
 async function handleCheckoutSubmit(e) {
   e.preventDefault();
   
   const submitBtn = e.target.querySelector('button[type="submit"]');
   submitBtn.disabled = true;
   submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Cargando checkout seguro...';
-
-  // Clear any previous error
-  const errorBox = document.getElementById('checkout-error');
-  if (errorBox) { errorBox.style.display = 'none'; errorBox.textContent = ''; }
   
   const customerName = document.getElementById('client-name').value.trim();
   const customerEmail = document.getElementById('client-email').value.trim();
   const customerPhone = document.getElementById('client-phone').value.trim();
+  
+  const street = document.getElementById('client-street').value.trim();
+  const number = document.getElementById('client-number').value.trim();
+  const neighborhood = document.getElementById('client-neighborhood').value.trim();
+  const zip = document.getElementById('client-zip').value.trim();
+  const city = document.getElementById('client-city').value.trim();
+  const state = document.getElementById('client-state').value.trim();
   const company = document.getElementById('client-company').value.trim();
+  const reference = document.getElementById('client-reference').value.trim();
+  
+  const companyPart = company ? `, Compañía: ${company}` : '';
+  const shippingAddress = `${street} ${number}, ${neighborhood}, C.P. ${zip}, ${city}, ${state}, ${reference}${companyPart}`;
   
   const cart = JSON.parse(localStorage.getItem('paps_cart') || '[]');
   
   if (cart.length === 0) {
-    showCheckoutError('Tu carrito está vacío.');
+    alert('Tu carrito está vacío.');
     submitBtn.disabled = false;
     submitBtn.textContent = 'Proceder al Pago';
     return;
   }
 
   if (typeof selectedShippingRate === 'undefined' || !selectedShippingRate) {
-    showCheckoutError('Por favor, selecciona un método de envío o elige "Recoger personalmente".');
+    alert('Por favor, ingresa tu Código Postal de 5 dígitos y selecciona una paquetería de envío.');
     submitBtn.disabled = false;
     submitBtn.innerHTML = '<i class="fa-solid fa-lock"></i> Proceder al Pago';
     return;
-  }
-
-  const isPickup = selectedShippingRate.name === 'Recoger personalmente';
-  let shippingAddress;
-
-  if (isPickup) {
-    // Validate pickup phone
-    if (!window.pickupPhone || !/^[0-9]{10}$/.test(window.pickupPhone)) {
-      showCheckoutError('Por favor, ingresa un número de teléfono de 10 dígitos para coordinar la recogida.');
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = '<i class="fa-solid fa-lock"></i> Proceder al Pago';
-      return;
-    }
-    const companyPart = company ? `, Compañía: ${company}` : '';
-    shippingAddress = `Recoger personalmente - Tel: ${window.pickupPhone}${companyPart}`;
-  } else {
-    const street = document.getElementById('client-street').value.trim();
-    const number = document.getElementById('client-number').value.trim();
-    const neighborhood = document.getElementById('client-neighborhood').value.trim();
-    const zip = document.getElementById('client-zip').value.trim();
-    const city = document.getElementById('client-city').value.trim();
-    const state = document.getElementById('client-state').value.trim();
-    const reference = document.getElementById('client-reference').value.trim();
-    const companyPart = company ? `, Compañía: ${company}` : '';
-    shippingAddress = `${street} ${number}, ${neighborhood}, C.P. ${zip}, ${city}, ${state}, ${reference}${companyPart}`;
   }
   
   try {
@@ -1169,30 +1126,15 @@ async function handleCheckoutSubmit(e) {
       // Redirect to payment simulator or Mercado Pago
       window.location.href = data.checkoutUrl;
     } else {
-      const errMsg = data.error || 'Ocurrió un error al procesar el checkout.';
-      const errorBox = document.getElementById('checkout-error');
-      if (errorBox) {
-        errorBox.textContent = errMsg;
-        errorBox.style.display = 'block';
-        errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      } else {
-        alert(errMsg);
-      }
+      alert(data.error || 'Ocurrió un error al procesar el checkout.');
       submitBtn.disabled = false;
-      submitBtn.innerHTML = '<i class="fa-solid fa-lock"></i> Proceder al Pago';
+      submitBtn.textContent = 'Proceder al Pago';
     }
   } catch (err) {
     console.error(err);
-    const errorBox = document.getElementById('checkout-error');
-    if (errorBox) {
-      errorBox.textContent = 'Error de conexión al procesar el pago. Por favor intenta de nuevo.';
-      errorBox.style.display = 'block';
-      errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } else {
-      alert('Error de conexión al procesar el pago.');
-    }
+    alert('Error de conexión al procesar el pago.');
     submitBtn.disabled = false;
-    submitBtn.innerHTML = '<i class="fa-solid fa-lock"></i> Proceder al Pago';
+    submitBtn.textContent = 'Proceder al Pago';
   }
 }
 
@@ -1974,30 +1916,6 @@ window.quickTrackOrder = function(folio) {
 /* ==========================================
    SHIPPING CALCULATION & SELECTION HANDLERS
    ========================================== */
-
-/* Build the 'Recoger personalmente' card HTML */
-function buildPickupCard() {
-  return `
-    <label class="shipping-rate-card" id="shipping-rate-card-pickup" style="margin-top: 8px;">
-      <input type="radio" name="shipping_rate" class="shipping-radio" value="Recoger personalmente"
-        onchange="selectShippingRate(this, 'pickup', 0, 'Recoger personalmente')">
-      <div class="shipping-rate-details">
-        <div class="carrier-info">
-          <span class="carrier-name"><i class="fa-solid fa-store" style="margin-right:6px;"></i>Recoger personalmente</span>
-          <span class="carrier-service">Coordinamos contigo la entrega</span>
-        </div>
-        <span class="carrier-price" style="color:#38a169;font-weight:700;">GRATIS</span>
-      </div>
-    </label>
-    <div id="pickup-phone-wrapper" style="display:none; margin-top:10px; padding:12px 16px; background:var(--bg-secondary,#f5f5f5); border-radius:8px; border:1px solid var(--border-color,#e0e0e0);">
-      <label for="pickup-phone-input" style="font-size:0.85rem; font-weight:600; display:block; margin-bottom:6px; color:var(--text-secondary,#555);">Número de Contacto para Coordinar Recogida</label>
-      <input id="pickup-phone-input" type="tel" pattern="[0-9]{10}" placeholder="Ej. 5545598011" maxlength="10"
-        style="width:100%; padding:8px 12px; border:1px solid var(--border-color,#ccc); border-radius:6px; font-size:0.95rem;"
-        oninput="window.pickupPhone = this.value.replace(/[^0-9]/g,'').slice(0,10); this.value=window.pickupPhone;">
-    </div>
-  `;
-}
-
 window.fetchShippingQuotes = async function(zip) {
   const wrapper = document.getElementById('shipping-methods-wrapper');
   const ratesList = document.getElementById('shipping-rates-list');
@@ -2033,7 +1951,6 @@ window.fetchShippingQuotes = async function(zip) {
           No hay paqueterías de envío disponibles para el C.P. ${zip}.
         </div>
       `;
-      ratesList.insertAdjacentHTML('beforeend', buildPickupCard());
       resetShippingChoice();
       return;
     }
@@ -2055,9 +1972,6 @@ window.fetchShippingQuotes = async function(zip) {
       `;
     }).join('');
     
-    // Append always-visible 'Recoger personalmente' option
-    ratesList.insertAdjacentHTML('beforeend', buildPickupCard());
-    
     // Pre-select the first rate option automatically
     const firstRadio = ratesList.querySelector('input[name="shipping_rate"]');
     if (firstRadio) {
@@ -2071,7 +1985,6 @@ window.fetchShippingQuotes = async function(zip) {
         Error al cotizar el envío. Intente de nuevo.
       </div>
     `;
-    ratesList.insertAdjacentHTML('beforeend', buildPickupCard());
     resetShippingChoice();
   }
 };
@@ -2194,22 +2107,6 @@ window.applyCoupon = async function() {
   }
 };
 
-/* Address field IDs that become optional when picking up in person */
-const ADDRESS_FIELD_IDS = ['client-street', 'client-number', 'client-neighborhood', 'client-zip', 'client-city', 'client-state', 'client-reference'];
-
-function setAddressFieldsRequired(required) {
-  ADDRESS_FIELD_IDS.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      if (required) {
-        el.setAttribute('required', 'required');
-      } else {
-        el.removeAttribute('required');
-      }
-    }
-  });
-}
-
 window.selectShippingRate = function(radioInput, idx, price, carrierName) {
   // Set the active class on the card
   const cards = document.querySelectorAll('.shipping-rate-card');
@@ -2223,22 +2120,6 @@ window.selectShippingRate = function(radioInput, idx, price, carrierName) {
   // Ensure the radio input is checked (useful if called programmatically)
   if (radioInput) {
     radioInput.checked = true;
-  }
-  
-  // Handle pickup-specific UI
-  const pickupWrapper = document.getElementById('pickup-phone-wrapper');
-  const isPickup = (carrierName === 'Recoger personalmente');
-  
-  if (pickupWrapper) {
-    pickupWrapper.style.display = isPickup ? 'block' : 'none';
-  }
-  
-  // Toggle address required state
-  setAddressFieldsRequired(!isPickup);
-  
-  // Reset pickupPhone when switching away from pickup
-  if (!isPickup) {
-    window.pickupPhone = null;
   }
   
   // Save selected rate to global and window variable

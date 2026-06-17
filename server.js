@@ -47,7 +47,7 @@ function rateLimiter(limit, windowMs) {
 // El costo de envío se cotiza por separado en checkout (Skydropx)
 function calculatePrice(supplierPrice) {
   if (supplierPrice === 0) return 0;
-  if (supplierPrice === 1) return 1;
+  if (supplierPrice === 1) return 5;
   const hour = new Date().getHours(); // 0 – 23
   const isNight = hour >= 0 && hour < 5;
   const surcharge = isNight ? 300 : 500;
