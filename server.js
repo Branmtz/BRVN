@@ -257,6 +257,11 @@ app.post('/api/shipping/quote', async (req, res) => {
 
 /* --- PUBLIC APIS --- */
 
+// GET Health Check (to keep serverless warm)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date() });
+});
+
 // GET Catalog of active products
 app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
   try {
