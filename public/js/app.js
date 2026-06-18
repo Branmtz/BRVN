@@ -2346,22 +2346,26 @@ window.selectCategory = async function(categoryName) {
   const genderParam = genderMap[categoryName];
 
   try {
-    let url = '/api/products?limit=24&page=0';
-    if (genderParam) url += `&gender=${encodeURIComponent(genderParam)}`;
+    let products = [];
+    let hasMore = false;
+    let total = 0;
 
-    const res = await fetchWithAuth(url);
-    if (!res.ok) throw new Error('Failed to fetch');
-    const data = await res.json();
-
-    // Handle both old array response and new paginated response
-    let products = Array.isArray(data) ? data : (data.products || []);
-    const hasMore = Array.isArray(data) ? false : (data.hasMore || false);
-    const total = Array.isArray(data) ? products.length : (data.total || products.length);
-
-    // For "Lo más vendido" fall back to local filter
     if (categoryName === 'Lo más vendido') {
-      await ensureProductsLoaded();
-      products = allProducts.filter(p => p.is_bestseller === 1 || p.is_bestseller === '1' || p.is_bestseller === true);
+      const res = await fetchWithAuth('/api/products/trends');
+      if (!res.ok) throw new Error('Failed to fetch trends');
+      products = await res.json();
+      total = products.length;
+    } else {
+      let url = '/api/products?limit=24&page=0';
+      if (genderParam) url += `&gender=${encodeURIComponent(genderParam)}`;
+
+      const res = await fetchWithAuth(url);
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+
+      products = Array.isArray(data) ? data : (data.products || []);
+      hasMore = Array.isArray(data) ? false : (data.hasMore || false);
+      total = Array.isArray(data) ? products.length : (data.total || products.length);
     }
 
     // Sort bestsellers first
