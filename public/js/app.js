@@ -189,7 +189,22 @@ function renderProducts() {
   appendProductBatch();
 }
 
+window.productCache = window.productCache || {};
+
+window.viewProduct = function(event, id) {
+  if (event) {
+    if (event.target.closest('.favorite-btn')) return;
+  }
+  const cachedProduct = window.productCache[id];
+  if (cachedProduct) {
+    sessionStorage.setItem('preloaded_product', JSON.stringify(cachedProduct));
+  }
+  window.location.href = `/product.html?id=${id}`;
+};
+
 function buildProductCard(p, imgClass = '') {
+  window.productCache[p.id] = p;
+  
   const mainImg = p.images && p.images.length > 0 ? p.images[0] : '/placeholder.jpg';
   const heartActive = p.isFavorite ? 'active' : '';
   const heartIcon = p.isFavorite ? 'fa-solid' : 'fa-regular';
@@ -199,7 +214,7 @@ function buildProductCard(p, imgClass = '') {
   const brandText = (isPicafresa && p.brand === 'PAPS') ? 'Dulce' : (p.brand || 'Calzado');
   
   return `
-    <article class="product-card" onclick="window.location.href='/product.html?id=${p.id}'">
+    <article class="product-card" onclick="viewProduct(event, '${p.id}')">
       <button class="favorite-btn ${heartActive}" onclick="toggleFavorite(event, '${p.id}')" title="Guardar en favoritos">
         <i class="${heartIcon} fa-heart"></i>
       </button>
@@ -219,7 +234,7 @@ function buildProductCard(p, imgClass = '') {
         <h3 class="product-title">${p.title}</h3>
         <div class="product-meta">
           <span class="product-price">$${p.price.toLocaleString()} MXN</span>
-          <a href="/product.html?id=${p.id}" class="view-btn">Ver</a>
+          <a href="javascript:void(0)" onclick="viewProduct(event, '${p.id}')" class="view-btn">Ver</a>
         </div>
       </div>
     </article>
@@ -482,11 +497,35 @@ async function initProductDetailPage() {
     return;
   }
   
+  // Try to load cached product immediately (optimistic rendering)
+  try {
+    const cachedStr = sessionStorage.getItem('preloaded_product');
+    if (cachedStr) {
+      const cached = JSON.parse(cachedStr);
+      if (cached && cached.id === productId) {
+        currentProduct = cached;
+        renderProductDetail();
+      }
+    }
+  } catch (cacheErr) {
+    console.warn('[Preload cache error]', cacheErr);
+  }
+  
   try {
     const res = await fetchWithAuth(`/api/products/${productId}`);
     if (!res.ok) throw new Error('Product not found');
-    currentProduct = await res.json();
-    renderProductDetail();
+    const freshProduct = await res.json();
+    
+    // Re-render only if there are critical changes (like stock or price)
+    const hasChanged = !currentProduct ||
+                       currentProduct.id !== freshProduct.id ||
+                       JSON.stringify(currentProduct.sizes_stock) !== JSON.stringify(freshProduct.sizes_stock) ||
+                       currentProduct.price !== freshProduct.price;
+                       
+    currentProduct = freshProduct;
+    if (hasChanged) {
+      renderProductDetail();
+    }
     
     // Trigger non-blocking live stock sync in the background
     if (currentProduct && currentProduct.origin === 'priceshoes') {
@@ -494,14 +533,16 @@ async function initProductDetailPage() {
     }
   } catch (err) {
     console.error(err);
-    document.getElementById('detail-page-content').innerHTML = `
-      <div style="text-align: center; padding: 64px 0; color: #ff3b30;">
-        <i class="fa-solid fa-triangle-exclamation" style="font-size: 32px; margin-bottom: 16px;"></i>
-        <h2>Producto no encontrado</h2>
-        <p style="color: var(--text-secondary); margin-top: 8px;">El calzado seleccionado no existe o no se encuentra activo.</p>
-        <a href="/" class="view-btn" style="display: inline-block; margin-top: 24px;">Volver al catálogo</a>
-      </div>
-    `;
+    if (!currentProduct) {
+      document.getElementById('detail-page-content').innerHTML = `
+        <div style="text-align: center; padding: 64px 0; color: #ff3b30;">
+          <i class="fa-solid fa-triangle-exclamation" style="font-size: 32px; margin-bottom: 16px;"></i>
+          <h2>Producto no encontrado</h2>
+          <p style="color: var(--text-secondary); margin-top: 8px;">El calzado seleccionado no existe o no se encuentra activo.</p>
+          <a href="/" class="view-btn" style="display: inline-block; margin-top: 24px;">Volver al catálogo</a>
+        </div>
+      `;
+    }
   }
 }
 
