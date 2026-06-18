@@ -1,4 +1,4 @@
-const { dbQuery } = require('./database');
+const { dbQuery, db } = require('./database');
 
 async function run() {
   try {
@@ -12,6 +12,9 @@ async function run() {
   } catch (err) {
     console.error("Error checking database schema:", err);
   } finally {
+    if (db && typeof db.close === 'function') {
+      db.close();
+    }
     process.exit(0);
   }
 }

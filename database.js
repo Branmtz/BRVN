@@ -58,6 +58,13 @@ const db = {
     dbQuery.all(sql, params).then(res => cb && cb(null, res)).catch(err => cb && cb(err));
   },
   close(callback) {
+    try {
+      if (client && typeof client.close === 'function') {
+        client.close();
+      }
+    } catch (err) {
+      console.error('Error closing client:', err.message);
+    }
     if (callback) callback();
   }
 };
@@ -193,6 +200,7 @@ async function initializeDatabase() {
         tracking_number TEXT,
         shipping_carrier TEXT,
         tracking_status TEXT DEFAULT 'compra_realizada',
+        shipping_cost REAL DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -202,6 +210,14 @@ async function initializeDatabase() {
     try {
       await dbQuery.run("ALTER TABLE orders ADD COLUMN tracking_status TEXT DEFAULT 'compra_realizada'");
       console.log('Migrated: tracking_status column added to orders.');
+    } catch (e) {
+      // column likely already exists
+    }
+
+    // Migration for orders table: add shipping_cost if not present
+    try {
+      await dbQuery.run("ALTER TABLE orders ADD COLUMN shipping_cost REAL DEFAULT 0");
+      console.log('Migrated: shipping_cost column added to orders.');
     } catch (e) {
       // column likely already exists
     }
