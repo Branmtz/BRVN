@@ -979,18 +979,23 @@ function renderCart() {
   
   if (!itemsContainer) return;
   
+  const cartLayout = document.querySelector('.cart-layout');
+  
   if (cart.length === 0) {
     itemsContainer.innerHTML = `
-      <div style="text-align: center; padding: 48px 0; color: var(--text-secondary);">
-        <i class="fa-solid fa-bag-shopping" style="font-size: 36px; margin-bottom: 16px;"></i>
-        <p>Tu carrito está vacío.</p>
-        <a href="/" class="view-btn" style="display: inline-block; margin-top: 16px;">Ir a comprar</a>
+      <div style="text-align: center; padding: 60px 0; color: var(--text-secondary);">
+        <i class="fa-solid fa-bag-shopping" style="font-size: 48px; margin-bottom: 20px; color: #a1a1aa;"></i>
+        <p style="font-size: 16px; margin-bottom: 24px; color: #71717a;">Tu carrito está vacío.</p>
+        <a href="/" class="view-btn" style="display: inline-block; padding: 10px 24px; background: #000; color: #fff; font-size: 13px; font-weight: 600; text-decoration: none; border-radius: 6px;">Ir a comprar</a>
       </div>
     `;
     const summaryBox = document.getElementById('checkout-box');
     if (summaryBox) summaryBox.style.display = 'none';
+    if (cartLayout) cartLayout.classList.add('empty');
     return;
   }
+  
+  if (cartLayout) cartLayout.classList.remove('empty');
   
   // Render Items list
   itemsContainer.innerHTML = cart.map((item, idx) => `

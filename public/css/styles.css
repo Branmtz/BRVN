@@ -548,6 +548,19 @@ header {
   padding: 40px 0;
 }
 
+.cart-layout.empty {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 40vh;
+  grid-template-columns: 1fr;
+  width: 100%;
+}
+
+.cart-layout.empty #cart-items-list {
+  width: 100%;
+}
+
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
