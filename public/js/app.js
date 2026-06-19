@@ -980,6 +980,17 @@ function initCartPage() {
   window.appliedDiscountPercent = 0;
 
   renderCart();
+  
+  // Set default shipping rate selection on load
+  const defaultRadio = document.querySelector('input[name="shipping_rate"]:checked');
+  if (defaultRadio) {
+    if (defaultRadio.value === 'Envío a domicilio') {
+      selectShippingRate(defaultRadio, 0, 0, 'Envío a domicilio');
+    } else if (defaultRadio.value === 'Recoger en persona') {
+      selectShippingRate(defaultRadio, 1, 0, 'Recoger en persona');
+    }
+  }
+
   checkAndPrefillCartForm();
   
   const checkoutForm = document.getElementById('checkout-form');
@@ -2080,9 +2091,15 @@ window.updateOrderSummaryTotals = function() {
   const shippingEl = document.getElementById('summary-shipping');
   if (shippingEl) {
     if (window.selectedShippingRate) {
-      shippingEl.textContent = `$${shippingCost.toLocaleString()} MXN`;
-      shippingEl.style.color = 'var(--text-primary)';
-      shippingEl.style.fontWeight = '600';
+      if (shippingCost === 0) {
+        shippingEl.textContent = 'Gratis';
+        shippingEl.style.color = '#16a34a';
+        shippingEl.style.fontWeight = '600';
+      } else {
+        shippingEl.textContent = `$${shippingCost.toLocaleString()} MXN`;
+        shippingEl.style.color = 'var(--text-primary)';
+        shippingEl.style.fontWeight = '600';
+      }
     } else {
       shippingEl.textContent = 'Por cotizar';
       shippingEl.style.color = 'var(--text-secondary)';
