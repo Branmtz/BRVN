@@ -831,8 +831,22 @@ window.addToCart = function() {
   localStorage.setItem('paps_cart', JSON.stringify(cart));
   updateCartCount();
   
-  // Redirect to shopping cart
-  window.location.href = '/cart.html';
+  // Show user feedback instead of redirecting
+  const buyBtn = document.getElementById('buy-btn');
+  if (buyBtn) {
+    const originalContent = buyBtn.innerHTML;
+    buyBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> ¡Añadido!';
+    buyBtn.style.backgroundColor = '#34c759'; // consistent green color
+    buyBtn.style.borderColor = '#34c759';
+    buyBtn.disabled = true;
+    
+    setTimeout(() => {
+      buyBtn.innerHTML = originalContent;
+      buyBtn.style.backgroundColor = '';
+      buyBtn.style.borderColor = '';
+      buyBtn.disabled = false;
+    }, 2000);
+  }
 };
 
 function triggerBackgroundStockSync(productId) {
