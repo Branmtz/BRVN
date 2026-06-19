@@ -287,15 +287,21 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
       whereClauses.push(`(LOWER(title) LIKE '${s}' OR LOWER(brand) LIKE '${s}' OR LOWER(sku) LIKE '${s}' OR LOWER(description) LIKE '${s}')`);
     }
 
+    if (req.query.brand && req.query.brand !== 'all') {
+      whereClauses.push("brand = ?");
+      params.push(req.query.brand);
+    }
+
     const where = whereClauses.join(' AND ');
 
     const products = await dbQuery.all(
       `SELECT * FROM products WHERE ${where} ORDER BY is_bestseller DESC, id DESC LIMIT ? OFFSET ?`,
-      [parseInt(limit), offset]
+      [...params, parseInt(limit), offset]
     );
 
     const totalRow = await dbQuery.get(
-      `SELECT COUNT(*) as total FROM products WHERE ${where}`
+      `SELECT COUNT(*) as total FROM products WHERE ${where}`,
+      params
     );
 
     // Fetch average ratings only for this batch
