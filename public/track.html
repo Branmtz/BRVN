@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BRVN — Rastrear Pedido</title>
-  <link rel="stylesheet" href="/css/styles.css?v=1.6">
+  <link rel="stylesheet" href="/css/styles.css?v=1.7">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
@@ -34,9 +34,12 @@
   <!-- Main Tracking Container -->
   <main class="container">
     <div class="tracking-card">
-      <div class="tracking-header">
+      <div class="tracking-header" style="text-align: left;">
+        <a href="/" class="back-home-button" style="display: inline-flex; margin-bottom: 24px;">
+          <i class="fa-solid fa-arrow-left"></i> Volver al Inicio
+        </a>
         <h2>Rastreo de Pedido</h2>
-        <p style="color: var(--text-secondary); font-size: 14px;">Ingresa tus datos para consultar el estado actual de tu compra.</p>
+        <p style="color: var(--text-secondary); font-size: 14px; margin-top: 8px;">Ingresa tus datos para consultar el estado actual de tu compra.</p>
       </div>
 
       <!-- Search Form -->
@@ -137,7 +140,7 @@
     </div>
   </footer>
 
-  <script src="/js/app.js?v=1.5"></script>
+  <script src="/js/app.js?v=1.7"></script>
   <script src="/js/track.js"></script>
 </body>
 </html>
