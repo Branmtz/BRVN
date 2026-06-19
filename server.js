@@ -2231,10 +2231,11 @@ async function runHourlySync() {
 
 // Schedule hourly sync only if not running on Vercel
 if (!process.env.VERCEL) {
-  setInterval(runHourlySync, 3600000); // 1 hour in ms
-
-  // Also run once on startup after 5 seconds to verify it works and sync initial data
-  setTimeout(runHourlySync, 5000);
+  // Automatic sync on localhost has been disabled to avoid high CPU/memory usage and overlapping runs.
+  // You can still trigger the sync manually from the admin panel.
+  // If you want to enable automatic intervals in the future, uncomment the lines below:
+  // setInterval(runHourlySync, 3600000); // 1 hour in ms
+  // setTimeout(runHourlySync, 5000);
 
   // Start server
   app.listen(PORT, () => {
