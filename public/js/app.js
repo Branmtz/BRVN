@@ -21,6 +21,8 @@ let currentImageIdx = 0;
 let selectedShippingRate = null;
 window.appliedCouponCode = null;
 window.appliedDiscountPercent = 0;
+window.appliedDiscountType = 'percent';
+window.appliedDiscountValue = 0;
 
 // Hero Carousel State
 let currentCarouselSlideIdx = 0;
@@ -992,6 +994,8 @@ window.toggleFavorite = async function(event, productId) {
 function initCartPage() {
   window.appliedCouponCode = null;
   window.appliedDiscountPercent = 0;
+  window.appliedDiscountType = 'percent';
+  window.appliedDiscountValue = 0;
 
   renderCart();
   
@@ -2075,8 +2079,19 @@ window.updateOrderSummaryTotals = function() {
   const cart = JSON.parse(localStorage.getItem('paps_cart') || '[]');
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
   
+  const discountType = window.appliedDiscountType || 'percent';
+  const discountValue = window.appliedDiscountValue || 0;
   const discountPercent = window.appliedDiscountPercent || 0;
-  const discountAmount = subtotal * (discountPercent / 100);
+  
+  let discountAmount = 0;
+  if (discountType === 'percent') {
+    discountAmount = subtotal * (discountValue / 100);
+  } else if (discountType === 'amount') {
+    discountAmount = discountValue;
+  } else {
+    discountAmount = subtotal * (discountPercent / 100);
+  }
+  
   const discountedSubtotal = subtotal - discountAmount;
   
   const shippingCost = window.selectedShippingRate ? window.selectedShippingRate.price : 0;
@@ -2089,13 +2104,19 @@ window.updateOrderSummaryTotals = function() {
   }
 
   const discountRow = document.getElementById('summary-discount-row');
-  const discountPercentEl = document.getElementById('summary-discount-percent');
   const discountValueEl = document.getElementById('summary-discount-value');
   
   if (discountRow) {
-    if (discountPercent > 0) {
+    if (discountAmount > 0) {
       discountRow.style.display = 'flex';
-      if (discountPercentEl) discountPercentEl.textContent = discountPercent;
+      const labelSpan = discountRow.querySelector('span:first-child');
+      if (labelSpan) {
+        if (discountType === 'percent') {
+          labelSpan.innerHTML = `Descuento (<span id="summary-discount-percent">${discountValue}</span>%)`;
+        } else {
+          labelSpan.innerHTML = `Descuento`;
+        }
+      }
       if (discountValueEl) discountValueEl.textContent = `-$${discountAmount.toLocaleString()} MXN`;
     } else {
       discountRow.style.display = 'none';
@@ -2164,9 +2185,17 @@ window.applyCoupon = async function() {
     if (res.ok && data.success) {
       window.appliedCouponCode = data.code;
       window.appliedDiscountPercent = data.discount_percent;
+      window.appliedDiscountType = data.discount_type;
+      window.appliedDiscountValue = data.discount_value;
       
       if (messageEl) {
-        messageEl.textContent = `Cupón aplicado: ${data.description || `${data.discount_percent}% de descuento`}`;
+        let descText = data.description;
+        if (!descText) {
+          descText = data.discount_type === 'percent' 
+            ? `${data.discount_value}% de descuento` 
+            : `$${data.discount_value.toLocaleString()} MXN de descuento`;
+        }
+        messageEl.textContent = `Cupón aplicado: ${descText}`;
         messageEl.style.color = '#38a169';
         messageEl.style.display = 'block';
       }
@@ -2175,6 +2204,8 @@ window.applyCoupon = async function() {
     } else {
       window.appliedCouponCode = null;
       window.appliedDiscountPercent = 0;
+      window.appliedDiscountType = 'percent';
+      window.appliedDiscountValue = 0;
       if (messageEl) {
         messageEl.textContent = data.error || 'El cupón no es válido.';
         messageEl.style.color = '#e53e3e';
@@ -2186,6 +2217,8 @@ window.applyCoupon = async function() {
     console.error('Error validating coupon:', err);
     window.appliedCouponCode = null;
     window.appliedDiscountPercent = 0;
+    window.appliedDiscountType = 'percent';
+    window.appliedDiscountValue = 0;
     if (messageEl) {
       messageEl.textContent = 'Error al validar el cupón. Inténtalo de nuevo.';
       messageEl.style.color = '#e53e3e';

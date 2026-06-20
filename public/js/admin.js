@@ -37,6 +37,16 @@ function initAnnouncementBanner() {
   }, 4000);
 }
 
+function checkResponseAuth(res) {
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem('paps_token');
+    alert('Tu sesión ha expirado o es inválida. Por favor, inicia sesión de nuevo.');
+    checkAuth();
+    throw new Error('Sesión expirada');
+  }
+  return res;
+}
+
 // Check JWT Token on load
 function checkAuth() {
   const token = localStorage.getItem('paps_token');
@@ -123,6 +133,7 @@ async function loadDashboardData() {
     const res = await fetch('/api/admin/analytics', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    checkResponseAuth(res);
     
     if (!res.ok) throw new Error('Failed to fetch analytics');
     const data = await res.json();
@@ -258,6 +269,7 @@ async function loadOrdersTable() {
     const res = await fetch('/api/admin/orders', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    checkResponseAuth(res);
     
     if (!res.ok) throw new Error('Failed to fetch orders');
     const orders = await res.json();
@@ -423,6 +435,7 @@ async function loadReportsData() {
     const res = await fetch('/api/admin/reports', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    checkResponseAuth(res);
     if (!res.ok) throw new Error('Failed');
     const data = await res.json();
 
@@ -522,6 +535,7 @@ async function loadAbandonedTable() {
     const res = await fetch('/api/admin/abandoned', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    checkResponseAuth(res);
     
     if (!res.ok) throw new Error('Failed to fetch abandoned carts');
     const carts = await res.json();
@@ -621,6 +635,7 @@ async function loadCatalogSources() {
     const res = await fetch('/api/admin/catalog-sources', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    checkResponseAuth(res);
     
     if (!res.ok) throw new Error('Failed to fetch catalog sources');
     const sources = await res.json();
@@ -697,6 +712,8 @@ async function loadCategories() {
       fetch('/api/categories/detailed', { headers: { 'Authorization': `Bearer ${token}` } }),
       fetch('/api/admin/catalog-sources',  { headers: { 'Authorization': `Bearer ${token}` } })
     ]);
+    checkResponseAuth(catRes);
+    checkResponseAuth(srcRes);
 
     const categories = catRes.ok ? await catRes.json() : [];
     const sources    = srcRes.ok ? await srcRes.json() : [];
@@ -818,6 +835,7 @@ window.loadTrackingTable = async function() {
     const res = await fetch('/api/admin/orders', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    checkResponseAuth(res);
     if (!res.ok) throw new Error('Failed to fetch orders');
     const orders = await res.json();
     
@@ -1039,12 +1057,13 @@ window.loadAdminCoupons = async function() {
   if (!listEl) return;
   listEl.innerHTML = '<p style="color:#aaa;">Cargando...</p>';
   try {
-    const token = localStorage.getItem('admin_token');
+    const token = localStorage.getItem('paps_token');
     const res = await fetch('/api/admin/coupons', {
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    checkResponseAuth(res);
     const data = await res.json();
-    if (!data.success || data.coupons.length === 0) {
+    if (!data.success || !data.coupons || data.coupons.length === 0) {
       listEl.innerHTML = '<p style="color:#aaa; font-style: italic;">No hay cupones globales creados aún.</p>';
       return;
     }
@@ -1097,12 +1116,13 @@ window.createAdminCoupon = async function() {
   }
 
   try {
-    const token = localStorage.getItem('admin_token');
+    const token = localStorage.getItem('paps_token');
     const res = await fetch('/api/admin/coupons', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ code, description, discount_type, discount_value: parseFloat(discount_value) })
     });
+    checkResponseAuth(res);
     const data = await res.json();
     if (!res.ok) {
       if (msgEl) { msgEl.style.display = 'block'; msgEl.style.color = '#ff3b30'; msgEl.textContent = data.error; }
@@ -1123,11 +1143,12 @@ window.createAdminCoupon = async function() {
 window.deleteAdminCoupon = async function(id, code) {
   if (!confirm(`¿Eliminar el cupón "${code}"?`)) return;
   try {
-    const token = localStorage.getItem('admin_token');
+    const token = localStorage.getItem('paps_token');
     const res = await fetch(`/api/admin/coupons/${id}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    checkResponseAuth(res);
     const data = await res.json();
     if (res.ok) {
       loadAdminCoupons();

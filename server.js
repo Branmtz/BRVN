@@ -621,20 +621,26 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     }
 
     // Validate Coupon if provided
-    let discountPercent = 0;
     let coupon = null;
     if (couponCode) {
       if (!customerId) {
         return res.status(400).json({ error: 'Inicia sesión para aplicar un cupón.' });
       }
+      // 1. Search user coupons first
       coupon = await dbQuery.get(
         "SELECT * FROM user_coupons WHERE user_id = ? AND LOWER(code) = ? AND used = 0",
         [customerId, couponCode.trim().toLowerCase()]
       );
       if (!coupon) {
+        // 2. Search global coupons
+        coupon = await dbQuery.get(
+          "SELECT * FROM global_coupons WHERE LOWER(code) = ?",
+          [couponCode.trim().toLowerCase()]
+        );
+      }
+      if (!coupon) {
         return res.status(400).json({ error: 'El cupón no es válido o ya fue utilizado.' });
       }
-      discountPercent = coupon.discount_percent || 0;
     }
 
     // 1. Calculate secure total from DB prices (prevent client-side tampering)
@@ -688,7 +694,17 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       });
     }
 
-    const discountAmount = itemsSubtotal * (discountPercent / 100);
+    let discountAmount = 0;
+    if (coupon) {
+      if (coupon.discount_type === 'amount') {
+        discountAmount = coupon.discount_value || 0;
+      } else if (coupon.discount_type === 'percent') {
+        discountAmount = itemsSubtotal * ((coupon.discount_value || 0) / 100);
+      } else {
+        // user coupon fallback (uses discount_percent)
+        discountAmount = itemsSubtotal * ((coupon.discount_percent || 0) / 100);
+      }
+    }
     let calculatedTotal = itemsSubtotal - discountAmount;
 
     // Envío incluido en el precio del producto — no se suma costo adicional
@@ -1443,19 +1459,43 @@ app.post('/api/coupons/validate', authenticateCustomer, async (req, res) => {
     return res.status(400).json({ error: 'El código de cupón es obligatorio.' });
   }
   try {
+    const normalizedCode = code.trim().toLowerCase();
+    
+    // 1. First search user-specific coupons
     const dbCoupon = await dbQuery.get(
       "SELECT * FROM user_coupons WHERE user_id = ? AND LOWER(code) = ? AND used = 0",
-      [req.customer.id, code.trim().toLowerCase()]
+      [req.customer.id, normalizedCode]
     );
-    if (!dbCoupon) {
-      return res.status(400).json({ error: 'El cupón no es válido o ya fue utilizado.' });
+    
+    if (dbCoupon) {
+      return res.json({
+        success: true,
+        code: dbCoupon.code,
+        description: dbCoupon.description,
+        discount_percent: dbCoupon.discount_percent,
+        discount_type: 'percent',
+        discount_value: dbCoupon.discount_percent
+      });
     }
-    res.json({
-      success: true,
-      code: dbCoupon.code,
-      description: dbCoupon.description,
-      discount_percent: dbCoupon.discount_percent
-    });
+
+    // 2. Then search global coupons
+    const globalCoupon = await dbQuery.get(
+      "SELECT * FROM global_coupons WHERE LOWER(code) = ?",
+      [normalizedCode]
+    );
+
+    if (globalCoupon) {
+      return res.json({
+        success: true,
+        code: globalCoupon.code,
+        description: globalCoupon.description,
+        discount_percent: globalCoupon.discount_type === 'percent' ? globalCoupon.discount_value : 0,
+        discount_type: globalCoupon.discount_type,
+        discount_value: globalCoupon.discount_value
+      });
+    }
+
+    return res.status(400).json({ error: 'El cupón no es válido o ya fue utilizado.' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error al validar el cupón.' });
@@ -2157,6 +2197,57 @@ app.post('/api/admin/products/purge', authenticateAdmin, async (req, res) => {
   } catch (err) {
     console.error('Error executing product purge:', err);
     res.status(500).json({ error: 'Error al eliminar los productos coincidentes.' });
+  }
+});
+
+// GET Admin coupons list (Admin only)
+app.get('/api/admin/coupons', authenticateAdmin, async (req, res) => {
+  try {
+    const coupons = await dbQuery.all("SELECT * FROM global_coupons ORDER BY created_at DESC");
+    res.json({ success: true, coupons });
+  } catch (err) {
+    console.error('Error fetching admin coupons:', err);
+    res.status(500).json({ error: 'Error al obtener los cupones.' });
+  }
+});
+
+// POST Create global coupon (Admin only)
+app.post('/api/admin/coupons', authenticateAdmin, async (req, res) => {
+  const { code, description, discount_type, discount_value } = req.body;
+  if (!code || !discount_type || discount_value === undefined) {
+    return res.status(400).json({ error: 'Código, tipo y valor son requeridos.' });
+  }
+  if (discount_type !== 'percent' && discount_type !== 'amount') {
+    return res.status(400).json({ error: 'Tipo de descuento inválido.' });
+  }
+  try {
+    const existing = await dbQuery.get("SELECT id FROM global_coupons WHERE LOWER(code) = ?", [code.trim().toLowerCase()]);
+    if (existing) {
+      return res.status(400).json({ error: 'El cupón ya existe.' });
+    }
+    await dbQuery.run(
+      "INSERT INTO global_coupons (code, description, discount_type, discount_value) VALUES (?, ?, ?, ?)",
+      [code.trim().toUpperCase(), description || null, discount_type, parseFloat(discount_value)]
+    );
+    res.json({ success: true, message: 'Cupón creado exitosamente.' });
+  } catch (err) {
+    console.error('Error creating admin coupon:', err);
+    res.status(500).json({ error: 'Error al crear el cupón.' });
+  }
+});
+
+// DELETE Admin coupon (Admin only)
+app.delete('/api/admin/coupons/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await dbQuery.run("DELETE FROM global_coupons WHERE id = ?", [id]);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'El cupón no existe.' });
+    }
+    res.json({ success: true, message: 'Cupón eliminado exitosamente.' });
+  } catch (err) {
+    console.error('Error deleting admin coupon:', err);
+    res.status(500).json({ error: 'Error al eliminar el cupón.' });
   }
 });
 

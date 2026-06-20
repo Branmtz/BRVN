@@ -309,6 +309,20 @@ async function initializeDatabase() {
     `);
     console.log('User coupons table verified/created.');
 
+    // Create global_coupons table
+    await dbQuery.run(`
+      CREATE TABLE IF NOT EXISTS global_coupons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT UNIQUE NOT NULL,
+        description TEXT,
+        discount_type TEXT NOT NULL CHECK(discount_type IN ('percent', 'amount')),
+        discount_value REAL NOT NULL,
+        active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Global coupons table verified/created.');
+
     // 4. Create Catalog Sources Table (for Hourly Auto-Scraper)
     await dbQuery.run(`
       CREATE TABLE IF NOT EXISTS catalog_sources (
