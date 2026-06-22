@@ -7,6 +7,8 @@ let currentBrandFilter = 'all';
 let currentTab = 'home';
 let currentSelectedCategory = null; // Can be 'Mujeres', 'Hombres', 'Niños', 'Lo más vendido'
 let categoryBrandFilter = 'all';
+let categoryTypeFilter = 'all';
+let categoryKidsGenderFilter = 'all';
 
 // Infinite scroll state
 const PAGE_SIZE = 24;
@@ -2415,7 +2417,27 @@ async function ensureProductsLoaded() {
 window.selectCategory = async function(categoryName) {
   currentSelectedCategory = categoryName;
   categoryBrandFilter = 'all';
+  categoryTypeFilter = 'all';
+  categoryKidsGenderFilter = 'all';
   categoryCurrentPage = 0;
+
+  // Reset UI select dropdowns
+  const brandSelect = document.getElementById('category-brand-select');
+  if (brandSelect) brandSelect.value = 'all';
+  const typeSelect = document.getElementById('category-type-select');
+  if (typeSelect) typeSelect.value = 'all';
+  const kidsGenderSelect = document.getElementById('category-kids-gender-select');
+  if (kidsGenderSelect) kidsGenderSelect.value = 'all';
+
+  // Toggle Kids Gender Filter visibility
+  const kidsGenderGroup = document.getElementById('category-kids-gender-group');
+  if (kidsGenderGroup) {
+    if (categoryName === 'Niños') {
+      kidsGenderGroup.style.display = 'block';
+    } else {
+      kidsGenderGroup.style.display = 'none';
+    }
+  }
 
   // Toggle sections visibility
   const landingContainer = document.getElementById('main-landing-container');
@@ -2548,6 +2570,12 @@ function setupServerPaginationObserver(genderParam, nextPage, total) {
       if (categoryBrandFilter && categoryBrandFilter !== 'all') {
         url += `&brand=${encodeURIComponent(categoryBrandFilter)}`;
       }
+      if (categoryTypeFilter && categoryTypeFilter !== 'all') {
+        url += `&type=${encodeURIComponent(categoryTypeFilter)}`;
+      }
+      if (categoryKidsGenderFilter && categoryKidsGenderFilter !== 'all') {
+        url += `&kids_gender=${encodeURIComponent(categoryKidsGenderFilter)}`;
+      }
       const res = await fetchWithAuth(url);
       if (!res.ok) return;
       const data = await res.json();
@@ -2557,9 +2585,7 @@ function setupServerPaginationObserver(genderParam, nextPage, total) {
       // Append to base products
       const alreadyRendered = categoryBaseProducts.length; // count BEFORE adding new
       categoryBaseProducts = [...categoryBaseProducts, ...newProducts];
-      categoryFilteredProducts = categoryBrandFilter === 'all'
-        ? categoryBaseProducts
-        : categoryBaseProducts.filter(p => p.brand === categoryBrandFilter);
+      categoryFilteredProducts = categoryBaseProducts;
 
       // Set page pointer to skip already-rendered products so appendCategoryProductBatch
       // slices from the correct offset (not from 0 again)
@@ -2582,6 +2608,8 @@ function setupServerPaginationObserver(genderParam, nextPage, total) {
 window.showMainLanding = function() {
   currentSelectedCategory = null;
   categoryBrandFilter = 'all';
+  categoryTypeFilter = 'all';
+  categoryKidsGenderFilter = 'all';
 
   const landingContainer = document.getElementById('main-landing-container');
   const catalogContainer = document.getElementById('category-catalog-container');
@@ -2595,24 +2623,105 @@ window.showMainLanding = function() {
   }
 };
 
+function getProductTypeJS(p) {
+  const title = (p.title || '').toUpperCase();
+  let subcat = '';
+  if (p.specifications) {
+    try {
+      const specs = typeof p.specifications === 'string' ? JSON.parse(p.specifications) : p.specifications;
+      if (specs.Subcategoría) subcat = specs.Subcategoría.toUpperCase();
+    } catch(e) {}
+  }
+  
+  if (title.includes('TENIS') || ['CHOCLO', 'CORRER', 'SKATE', 'FUTBOL', 'ENTRENAMIENTO', 'BASKETBALL', 'PADEL', 'CAMINAR'].includes(subcat)) {
+    return 'Tenis';
+  }
+  if (title.includes('SANDALIA') || title.includes('SUECO') || ['SANDALIA', 'SUECO'].includes(subcat)) {
+    return 'Sandalias';
+  }
+  if (title.includes('BOTA') || subcat === 'BOTA') {
+    return 'Botas';
+  }
+  if (subcat === 'ACCESORIO DE CALZADO' || subcat === 'CALCETIN' || subcat === 'CUIDADO DEL ZAPATO') {
+    return 'Otros';
+  }
+  return 'Zapato';
+}
+
+function getKidsGenderJS(p) {
+  const title = (p.title || '').toUpperCase();
+  const desc = (p.description || '').toUpperCase();
+  const category = (p.category || '').toUpperCase();
+  
+  let color = '';
+  let acabado = '';
+  let subcat = '';
+  if (p.specifications) {
+    try {
+      const specs = typeof p.specifications === 'string' ? JSON.parse(p.specifications) : p.specifications;
+      if (specs.Color) color = specs.Color.toUpperCase();
+      if (specs.Acabado) acabado = specs.Acabado.toUpperCase();
+      if (specs.Subcategoría) subcat = specs.Subcategoría.toUpperCase();
+    } catch(e) {}
+  }
+
+  if (category === 'NIÑAS' || category === 'NIÑA') return 'Niña';
+  if (category === 'NIÑOS' || category === 'NIÑO') return 'Niño';
+
+  const girlKeywords = [
+    'NIÑA', 'NIÑAS', 'BARBIE', 'PRINCESA', 'PRINCESAS', 'MINNIE', 'DAISY', 
+    'HELLO KITTY', 'UNICORNIO', 'SIRENA', 'L.O.L.', 'FROZEN', 'ELSA', 'ANNA', 
+    'LADYBUG', 'LAS CHICAS SUPER PODEROSAS', 'GIRL', 'GIRLS', 'VIVIS SHOES'
+  ];
+  const boyKeywords = [
+    'NIÑO', 'NIÑOS', 'SPIDERMAN', 'SPIDER-MAN', 'BATMAN', 'AVENGERS', 'MARVEL', 
+    'MINECRAFT', 'MARIO BROS', 'LUIGI', 'JURASSIC', 'DINOSAURIO', 'RAYO MCQUEEN', 
+    'HOT WHEELS', 'DRAGON BALL', 'GOKU', 'BOY', 'BOYS'
+  ];
+
+  if (girlKeywords.some(kw => title.includes(kw) || desc.includes(kw))) return 'Niña';
+  if (boyKeywords.some(kw => title.includes(kw) || desc.includes(kw))) return 'Niño';
+
+  if (subcat === 'BALLERINA') return 'Niña';
+  if (acabado === 'MOÑO' || acabado === 'FLOR' || acabado === 'BRILLOS' || acabado === 'GLITTER') return 'Niña';
+  
+  if (['ROSA', 'PINK', 'FUCSIA', 'LILA', 'MORADO', 'GLITTER'].some(c => color.includes(c) || title.includes(c))) {
+    return 'Niña';
+  }
+
+  return 'Unisex';
+}
+
 function applyCategoryFilters(baseProducts) {
   if (baseProducts) {
     categoryBaseProducts = baseProducts;
   }
   
-  if (categoryBrandFilter === 'all') {
-    categoryFilteredProducts = categoryBaseProducts;
-  } else {
-    categoryFilteredProducts = categoryBaseProducts.filter(p => p.brand === categoryBrandFilter);
-  }
+  categoryFilteredProducts = categoryBaseProducts.filter(p => {
+    // 1. Brand filter
+    if (categoryBrandFilter !== 'all' && p.brand !== categoryBrandFilter) {
+      return false;
+    }
+    // 2. Type filter
+    if (categoryTypeFilter !== 'all' && getProductTypeJS(p) !== categoryTypeFilter) {
+      return false;
+    }
+    // 3. Kids gender filter
+    if (categoryKidsGenderFilter !== 'all') {
+      const kidsGender = getKidsGenderJS(p);
+      if (categoryKidsGenderFilter === 'Niña') {
+        return kidsGender === 'Niña' || kidsGender === 'Unisex';
+      } else if (categoryKidsGenderFilter === 'Niño') {
+        return kidsGender === 'Niño' || kidsGender === 'Unisex';
+      }
+    }
+    return true;
+  });
   
   renderCategoryProducts();
 }
 
-window.filterCategoryByBrand = async function(brand) {
-  categoryBrandFilter = brand;
-  categoryCurrentPage = 0;
-
+async function fetchFilteredProducts() {
   const genderMap = {
     'Mujeres': 'Mujeres',
     'Hombres': 'Hombres',
@@ -2639,8 +2748,14 @@ window.filterCategoryByBrand = async function(brand) {
 
       let url = '/api/products?limit=24&page=0';
       url += `&gender=${encodeURIComponent(genderParam)}`;
-      if (brand && brand !== 'all') {
-        url += `&brand=${encodeURIComponent(brand)}`;
+      if (categoryBrandFilter && categoryBrandFilter !== 'all') {
+        url += `&brand=${encodeURIComponent(categoryBrandFilter)}`;
+      }
+      if (categoryTypeFilter && categoryTypeFilter !== 'all') {
+        url += `&type=${encodeURIComponent(categoryTypeFilter)}`;
+      }
+      if (categoryKidsGenderFilter && categoryKidsGenderFilter !== 'all') {
+        url += `&kids_gender=${encodeURIComponent(categoryKidsGenderFilter)}`;
       }
 
       const res = await fetchWithAuth(url);
@@ -2681,6 +2796,24 @@ window.filterCategoryByBrand = async function(brand) {
   } else {
     applyCategoryFilters();
   }
+}
+
+window.filterCategoryByBrand = async function(brand) {
+  categoryBrandFilter = brand;
+  categoryCurrentPage = 0;
+  await fetchFilteredProducts();
+};
+
+window.filterCategoryByType = async function(type) {
+  categoryTypeFilter = type;
+  categoryCurrentPage = 0;
+  await fetchFilteredProducts();
+};
+
+window.filterCategoryByKidsGender = async function(gender) {
+  categoryKidsGenderFilter = gender;
+  categoryCurrentPage = 0;
+  await fetchFilteredProducts();
 };
 
 function renderCategoryProducts() {

@@ -275,6 +275,26 @@
               <option value="all">Todas las Marcas</option>
             </select>
           </div>
+
+          <div class="filter-group">
+            <label for="category-type-select" class="brand-filter-label">Tipo de calzado:</label>
+            <select id="category-type-select" onchange="filterCategoryByType(this.value)" class="filter-select">
+              <option value="all">Todos los tipos</option>
+              <option value="Zapato">Zapato</option>
+              <option value="Tenis">Tenis</option>
+              <option value="Sandalias">Sandalias</option>
+              <option value="Botas">Botas</option>
+            </select>
+          </div>
+
+          <div class="filter-group" id="category-kids-gender-group" style="display: none;">
+            <label for="category-kids-gender-select" class="brand-filter-label">Género:</label>
+            <select id="category-kids-gender-select" onchange="filterCategoryByKidsGender(this.value)" class="filter-select">
+              <option value="all">Niño / Niña</option>
+              <option value="Niño">Niño</option>
+              <option value="Niña">Niña</option>
+            </select>
+          </div>
         </div>
 
         <!-- Product Grid -->

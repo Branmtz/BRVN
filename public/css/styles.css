@@ -2374,6 +2374,7 @@ footer {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
   margin-bottom: 24px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border-color);

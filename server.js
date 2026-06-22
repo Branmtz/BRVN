@@ -56,6 +56,75 @@ function calculatePrice(supplierPrice) {
   return Math.round(precioFinal * 100) / 100;
 }
 
+function getProductTypeJS(p) {
+  const title = (p.title || '').toUpperCase();
+  let subcat = '';
+  if (p.specifications) {
+    try {
+      const specs = typeof p.specifications === 'string' ? JSON.parse(p.specifications) : p.specifications;
+      if (specs.Subcategoría) subcat = specs.Subcategoría.toUpperCase();
+    } catch(e) {}
+  }
+  
+  if (title.includes('TENIS') || ['CHOCLO', 'CORRER', 'SKATE', 'FUTBOL', 'ENTRENAMIENTO', 'BASKETBALL', 'PADEL', 'CAMINAR'].includes(subcat)) {
+    return 'Tenis';
+  }
+  if (title.includes('SANDALIA') || title.includes('SUECO') || ['SANDALIA', 'SUECO'].includes(subcat)) {
+    return 'Sandalias';
+  }
+  if (title.includes('BOTA') || subcat === 'BOTA') {
+    return 'Botas';
+  }
+  if (subcat === 'ACCESORIO DE CALZADO' || subcat === 'CALCETIN' || subcat === 'CUIDADO DEL ZAPATO') {
+    return 'Otros';
+  }
+  return 'Zapato';
+}
+
+function getKidsGenderJS(p) {
+  const title = (p.title || '').toUpperCase();
+  const desc = (p.description || '').toUpperCase();
+  const category = (p.category || '').toUpperCase();
+  
+  let color = '';
+  let acabado = '';
+  let subcat = '';
+  if (p.specifications) {
+    try {
+      const specs = typeof p.specifications === 'string' ? JSON.parse(p.specifications) : p.specifications;
+      if (specs.Color) color = specs.Color.toUpperCase();
+      if (specs.Acabado) acabado = specs.Acabado.toUpperCase();
+      if (specs.Subcategoría) subcat = specs.Subcategoría.toUpperCase();
+    } catch(e) {}
+  }
+
+  if (category === 'NIÑAS' || category === 'NIÑA') return 'Niña';
+  if (category === 'NIÑOS' || category === 'NIÑO') return 'Niño';
+
+  const girlKeywords = [
+    'NIÑA', 'NIÑAS', 'BARBIE', 'PRINCESA', 'PRINCESAS', 'MINNIE', 'DAISY', 
+    'HELLO KITTY', 'UNICORNIO', 'SIRENA', 'L.O.L.', 'FROZEN', 'ELSA', 'ANNA', 
+    'LADYBUG', 'LAS CHICAS SUPER PODEROSAS', 'GIRL', 'GIRLS', 'VIVIS SHOES'
+  ];
+  const boyKeywords = [
+    'NIÑO', 'NIÑOS', 'SPIDERMAN', 'SPIDER-MAN', 'BATMAN', 'AVENGERS', 'MARVEL', 
+    'MINECRAFT', 'MARIO BROS', 'LUIGI', 'JURASSIC', 'DINOSAURIO', 'RAYO MCQUEEN', 
+    'HOT WHEELS', 'DRAGON BALL', 'GOKU', 'BOY', 'BOYS'
+  ];
+
+  if (girlKeywords.some(kw => title.includes(kw) || desc.includes(kw))) return 'Niña';
+  if (boyKeywords.some(kw => title.includes(kw) || desc.includes(kw))) return 'Niño';
+
+  if (subcat === 'BALLERINA') return 'Niña';
+  if (acabado === 'MOÑO' || acabado === 'FLOR' || acabado === 'BRILLOS' || acabado === 'GLITTER') return 'Niña';
+  
+  if (['ROSA', 'PINK', 'FUCSIA', 'LILA', 'MORADO', 'GLITTER'].some(c => color.includes(c) || title.includes(c))) {
+    return 'Niña';
+  }
+
+  return 'Unisex';
+}
+
 // Helper: Send Twilio WhatsApp Message
 async function sendWhatsAppAlert(orderId, customerName, total, items) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
@@ -292,6 +361,79 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
       params.push(req.query.brand);
     }
 
+    if (req.query.type && req.query.type !== 'all') {
+      const typeSandaliaSql = `(LOWER(title) LIKE '%sandalia%' OR LOWER(title) LIKE '%sueco%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"sandalia"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"sueco"%')`;
+      
+      const typeBotaSql = `(LOWER(title) LIKE '%bota%' 
+                OR LOWER(title) LIKE '%botin%' 
+                OR LOWER(title) LIKE '%botín%' 
+                OR LOWER(title) LIKE '%botÍn%'
+                OR LOWER(specifications) LIKE '%"subcategoría":"bota"%')`;
+      
+      const typeZapatoSql = `(LOWER(title) LIKE '%mocasin%' 
+                OR LOWER(title) LIKE '%mocasín%' 
+                OR LOWER(title) LIKE '%mocasÍn%'
+                OR LOWER(title) LIKE '%zapato%' 
+                OR LOWER(title) LIKE '%zapatilla%' 
+                OR LOWER(title) LIKE '%ballerina%' 
+                OR LOWER(title) LIKE '%alpargata%'
+                OR LOWER(specifications) LIKE '%"subcategoría":"ballerina"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"zapatilla"%')`;
+
+      const typeTenisSql = `(LOWER(title) LIKE '%tenis%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"choclo"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"correr"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"skate"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"futbol"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"entrenamiento"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"basketball"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"padel"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"caminar"%')`;
+
+      const typeOtrosSql = `(LOWER(specifications) LIKE '%"subcategoría":"accesorio de calzado"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"calcetin"%' 
+                OR LOWER(specifications) LIKE '%"subcategoría":"cuidado del zapato"%')`;
+
+      if (req.query.type === 'Sandalias') {
+        whereClauses.push(typeSandaliaSql);
+      } else if (req.query.type === 'Botas') {
+        whereClauses.push(typeBotaSql);
+      } else if (req.query.type === 'Zapato') {
+        whereClauses.push(`(${typeZapatoSql} OR (NOT ${typeSandaliaSql} AND NOT ${typeBotaSql} AND NOT ${typeTenisSql} AND NOT ${typeOtrosSql}))`);
+      } else if (req.query.type === 'Tenis') {
+        whereClauses.push(`(${typeTenisSql} AND NOT ${typeSandaliaSql} AND NOT ${typeBotaSql} AND NOT ${typeZapatoSql})`);
+      }
+    }
+
+    if (req.query.kids_gender && req.query.kids_gender !== 'all') {
+      const niñaClause = `(
+        LOWER(category) = 'niñas' OR LOWER(category) = 'niña'
+        OR LOWER(title) LIKE '%niña%' OR LOWER(title) LIKE '%niñas%' OR LOWER(title) LIKE '%niña%' OR LOWER(title) LIKE '%niñas%'
+        OR LOWER(title) LIKE '%barbie%' OR LOWER(title) LIKE '%princesa%' OR LOWER(title) LIKE '%princesas%' OR LOWER(title) LIKE '%minnie%' OR LOWER(title) LIKE '%daisy%' OR LOWER(title) LIKE '%hello kitty%' OR LOWER(title) LIKE '%unicornio%' OR LOWER(title) LIKE '%sirena%' OR LOWER(title) LIKE '%l.o.l.%' OR LOWER(title) LIKE '%frozen%' OR LOWER(title) LIKE '%elsa%' OR LOWER(title) LIKE '%anna%' OR LOWER(title) LIKE '%ladybug%' OR LOWER(title) LIKE '%las chicas super poderosas%' OR LOWER(title) LIKE '%girl%' OR LOWER(title) LIKE '%girls%' OR LOWER(title) LIKE '%vivis shoes%'
+        OR LOWER(description) LIKE '%niña%' OR LOWER(description) LIKE '%niñas%' OR LOWER(description) LIKE '%niña%' OR LOWER(description) LIKE '%niñas%'
+        OR LOWER(description) LIKE '%barbie%' OR LOWER(description) LIKE '%princesa%' OR LOWER(description) LIKE '%princesas%' OR LOWER(description) LIKE '%minnie%' OR LOWER(description) LIKE '%daisy%' OR LOWER(description) LIKE '%hello kitty%' OR LOWER(description) LIKE '%unicornio%' OR LOWER(description) LIKE '%sirena%' OR LOWER(description) LIKE '%l.o.l.%' OR LOWER(description) LIKE '%frozen%' OR LOWER(description) LIKE '%elsa%' OR LOWER(description) LIKE '%anna%' OR LOWER(description) LIKE '%ladybug%' OR LOWER(description) LIKE '%las chicas super poderosas%' OR LOWER(description) LIKE '%girl%' OR LOWER(description) LIKE '%girls%' OR LOWER(description) LIKE '%vivis shoes%'
+        OR LOWER(specifications) LIKE '%"subcategoría":"ballerina"%'
+        OR LOWER(specifications) LIKE '%"acabado":"moño"%' OR LOWER(specifications) LIKE '%"acabado":"flor"%' OR LOWER(specifications) LIKE '%"acabado":"brillos"%' OR LOWER(specifications) LIKE '%"acabado":"glitter"%'
+        OR LOWER(specifications) LIKE '%"color":"%rosa%"%' OR LOWER(specifications) LIKE '%"color":"%pink%"%' OR LOWER(specifications) LIKE '%"color":"%fucsia%"%' OR LOWER(specifications) LIKE '%"color":"%lila%"%' OR LOWER(specifications) LIKE '%"color":"%morado%"%' OR LOWER(specifications) LIKE '%"color":"%glitter%"%'
+        OR LOWER(title) LIKE '%rosa%' OR LOWER(title) LIKE '%pink%' OR LOWER(title) LIKE '%fucsia%' OR LOWER(title) LIKE '%lila%' OR LOWER(title) LIKE '%morado%' OR LOWER(title) LIKE '%glitter%'
+      )`;
+      const niñoClause = `(
+        LOWER(category) = 'niños' OR LOWER(category) = 'niño'
+        OR LOWER(title) LIKE '%niño%' OR LOWER(title) LIKE '%niños%' OR LOWER(title) LIKE '%niño%' OR LOWER(title) LIKE '%niños%'
+        OR LOWER(title) LIKE '%spiderman%' OR LOWER(title) LIKE '%spider-man%' OR LOWER(title) LIKE '%batman%' OR LOWER(title) LIKE '%avengers%' OR LOWER(title) LIKE '%marvel%' OR LOWER(title) LIKE '%minecraft%' OR LOWER(title) LIKE '%mario bros%' OR LOWER(title) LIKE '%luigi%' OR LOWER(title) LIKE '%jurassic%' OR LOWER(title) LIKE '%dinosaurio%' OR LOWER(title) LIKE '%rayo mcqueen%' OR LOWER(title) LIKE '%hot wheels%' OR LOWER(title) LIKE '%dragon ball%' OR LOWER(title) LIKE '%goku%' OR LOWER(title) LIKE '%boy%' OR LOWER(title) LIKE '%boys%'
+        OR LOWER(description) LIKE '%niño%' OR LOWER(description) LIKE '%niños%' OR LOWER(description) LIKE '%niño%' OR LOWER(description) LIKE '%niños%'
+        OR LOWER(description) LIKE '%spiderman%' OR LOWER(description) LIKE '%spider-man%' OR LOWER(description) LIKE '%batman%' OR LOWER(description) LIKE '%avengers%' OR LOWER(description) LIKE '%marvel%' OR LOWER(description) LIKE '%minecraft%' OR LOWER(description) LIKE '%mario bros%' OR LOWER(description) LIKE '%luigi%' OR LOWER(description) LIKE '%jurassic%' OR LOWER(description) LIKE '%dinosaurio%' OR LOWER(description) LIKE '%rayo mcqueen%' OR LOWER(description) LIKE '%hot wheels%' OR LOWER(description) LIKE '%dragon ball%' OR LOWER(description) LIKE '%goku%' OR LOWER(description) LIKE '%boy%' OR LOWER(description) LIKE '%boys%'
+      )`;
+
+      if (req.query.kids_gender === 'Niña') {
+        whereClauses.push(`(${niñaClause} OR (NOT ${niñaClause} AND NOT ${niñoClause}))`);
+      } else if (req.query.kids_gender === 'Niño') {
+        whereClauses.push(`(${niñoClause} OR (NOT ${niñaClause} AND NOT ${niñoClause}))`);
+      }
+    }
+
     const where = whereClauses.join(' AND ');
 
     const products = await dbQuery.all(
@@ -494,6 +636,24 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
       });
     }
     
+    if (req.query.brand && req.query.brand !== 'all') {
+      trendsList = trendsList.filter(p => p.brand === req.query.brand);
+    }
+    if (req.query.type && req.query.type !== 'all') {
+      trendsList = trendsList.filter(p => getProductTypeJS(p) === req.query.type);
+    }
+    if (req.query.kids_gender && req.query.kids_gender !== 'all') {
+      trendsList = trendsList.filter(p => {
+        const kidsGender = getKidsGenderJS(p);
+        if (req.query.kids_gender === 'Niña') {
+          return kidsGender === 'Niña' || kidsGender === 'Unisex';
+        } else if (req.query.kids_gender === 'Niño') {
+          return kidsGender === 'Niño' || kidsGender === 'Unisex';
+        }
+        return true;
+      });
+    }
+
     res.json(trendsList);
   } catch (err) {
     console.error('Trends error:', err);
