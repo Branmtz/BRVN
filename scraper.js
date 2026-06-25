@@ -299,8 +299,9 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
           const title = `${source.brand || ''} - ${source.name || ''}`.trim();
           const description = source.material ? `Material: ${source.material}. Subcategoría: ${source.subcategory || ''}` : `Calzado importado. Marca: ${source.brand || ''}`;
           // price_member   = precio de socio/costo (ej. $549) — se usa como nuestro costo en BRVN
-          // price_customer = precio público del catálogo (ej. $749) — fallback si no está el de socio
+          // price_customer = precio público del catálogo (ej. $749) — se guarda como ps_public_price para referencia
           const supplierPrice = source.price_member || source.price_customer || 0;
+          const psPublicPrice = source.price_customer || null;
           const fallbackSizes = Array.isArray(source.sizes) ? Array.from(new Set(source.sizes.map(s => s.toString()))) : [];
           const images = Array.isArray(source.images) 
             ? source.images.map(img => `https://res.cloudinary.com/priceshoes/image/upload/${img.startsWith('/') ? img.slice(1) : img}`)
@@ -338,6 +339,7 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             title: title,
             description: description,
             supplier_price: supplierPrice,
+            ps_public_price: psPublicPrice,
             images: JSON.stringify(images),
             sizes: JSON.stringify(sizes),
             sizes_stock: JSON.stringify(sizesStock),
@@ -369,12 +371,12 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             // Update product data but PRESERVE existing category to prevent cross-category corruption
             await dbQuery.run(`
               UPDATE products SET
-                title=?, description=?, supplier_price=?, images=?, sizes=?, sizes_stock=?,
+                title=?, description=?, supplier_price=?, ps_public_price=?, images=?, sizes=?, sizes_stock=?,
                 color=?, gender=?, original_url=?, stock=?, status=?, brand=?,
                 specifications=?, is_bestseller=?
               WHERE sku=?
             `, [
-              item.title, item.description, item.supplier_price, item.images, item.sizes, item.sizes_stock,
+              item.title, item.description, item.supplier_price, item.ps_public_price, item.images, item.sizes, item.sizes_stock,
               item.color, item.gender, item.original_url, item.stock, item.status, item.brand,
               item.specifications, item.is_bestseller, item.sku
             ]);
@@ -383,11 +385,11 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             // Brand new product — insert with the assigned category
             await dbQuery.run(`
               INSERT INTO products (
-                id, sku, title, description, price, supplier_price, images, sizes, sizes_stock, color, gender, origin, original_url, stock, status, category, brand, specifications, is_bestseller
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, sku, title, description, price, supplier_price, ps_public_price, images, sizes, sizes_stock, color, gender, origin, original_url, stock, status, category, brand, specifications, is_bestseller
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
               item.id, item.sku, item.title, item.description, null,
-              item.supplier_price, item.images, item.sizes, item.sizes_stock, item.color, item.gender,
+              item.supplier_price, item.ps_public_price, item.images, item.sizes, item.sizes_stock, item.color, item.gender,
               item.origin, item.original_url, item.stock, item.status, item.category, item.brand,
               item.specifications, item.is_bestseller
             ]);

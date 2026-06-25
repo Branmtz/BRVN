@@ -67,6 +67,7 @@
         <button class="admin-tab" onclick="switchTab('abandoned-section', this)">Carritos Abandonados</button>
         <button class="admin-tab" onclick="switchTab('coupons-section', this); loadAdminCoupons()">🎟️ Descuentos</button>
         <button class="admin-tab" onclick="switchTab('scraper-section', this)">Sincronizar Stock</button>
+        <button class="admin-tab" id="comparador-tab-btn" onclick="switchTab('comparador-section', this); loadComparadorSection()">💰 Comparador</button>
       </div>
 
       <!-- SECTION: DASHBOARD (Analytics) -->
@@ -393,6 +394,118 @@
       </section>
 
     </div>
+
+    <!-- SECTION: COMPARADOR DE PRECIOS -->
+    <section id="comparador-section" class="admin-section">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h3 style="font-size:20px; font-weight:600; margin:0;">💰 Comparador de Precios</h3>
+          <p style="color:var(--text-secondary); font-size:13px; margin-top:4px;">
+            Evalúa tenis bestsellers vs Mercado Libre y decide automáticamente qué publicar.
+          </p>
+        </div>
+        <button id="run-comparador-btn" onclick="runComparador()" class="buy-button" style="width:auto; padding:12px 24px;">
+          <i class="fa-solid fa-magnifying-glass-dollar"></i> Ejecutar Comparación
+        </button>
+      </div>
+
+      <!-- Stats Cards -->
+      <div class="analytics-grid" style="margin-bottom:28px;">
+        <div class="analytics-card" style="border-left:4px solid #34c759;">
+          <div class="card-title">Auto-Publicados</div>
+          <div class="card-value" id="cmp-published" style="color:#34c759;">—</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Publicados automáticamente</div>
+        </div>
+        <div class="analytics-card" style="border-left:4px solid #ff9500;">
+          <div class="card-title">Revisión Manual</div>
+          <div class="card-value" id="cmp-pending" style="color:#ff9500;">—</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">No encontrados en ML</div>
+        </div>
+        <div class="analytics-card" style="border-left:4px solid #ff3b30;">
+          <div class="card-title">Rechazados</div>
+          <div class="card-value" id="cmp-rejected" style="color:#ff3b30;">—</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">No competitivos</div>
+        </div>
+        <div class="analytics-card" style="border-left:4px solid #007aff;">
+          <div class="card-title">Progreso</div>
+          <div class="card-value" id="cmp-progress" style="color:#007aff;">—</div>
+          <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">Procesados / Total</div>
+        </div>
+      </div>
+
+      <!-- Progress bar -->
+      <div id="cmp-progress-bar-container" style="display:none; margin-bottom:24px;">
+        <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-secondary); margin-bottom:6px;">
+          <span id="cmp-current-product" style="font-style:italic;">Iniciando...</span>
+          <span id="cmp-pct">0%</span>
+        </div>
+        <div style="background:#e5e5e5; border-radius:99px; height:8px; overflow:hidden;">
+          <div id="cmp-bar" style="background:linear-gradient(90deg,#007aff,#34c759); height:100%; width:0%; border-radius:99px; transition:width 0.4s ease;"></div>
+        </div>
+      </div>
+
+      <!-- Sub-tabs -->
+      <div style="display:flex; gap:8px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:12px;">
+        <button id="cmp-tab-pending" onclick="showCmpTab('pending')" style="padding:7px 16px; border-radius:6px; font-size:13px; font-weight:600; background:#ff9500; color:#fff; border:none; cursor:pointer;">
+          ⚠️ Revisión Manual <span id="cmp-pending-badge" style="background:rgba(255,255,255,0.3); border-radius:99px; padding:1px 7px; font-size:11px; margin-left:4px;">0</span>
+        </button>
+        <button id="cmp-tab-history" onclick="showCmpTab('history')" style="padding:7px 16px; border-radius:6px; font-size:13px; font-weight:600; background:var(--text-primary); color:#fff; border:none; cursor:pointer;opacity:0.5;">
+          📋 Historial
+        </button>
+      </div>
+
+      <!-- Panel: Revisión Manual -->
+      <div id="cmp-panel-pending">
+        <div id="cmp-pending-empty" style="display:none; text-align:center; padding:40px; color:var(--text-secondary);">
+          <i class="fa-solid fa-circle-check" style="font-size:32px; color:#34c759; margin-bottom:12px;"></i>
+          <p>No hay productos pendientes de revisión manual.</p>
+        </div>
+        <div class="table-container" id="cmp-pending-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:60px;">Img</th>
+                <th>Producto</th>
+                <th style="text-align:right;">Costo PS</th>
+                <th style="text-align:right;">Precio BRVN</th>
+                <th style="text-align:right;">Margen PS</th>
+                <th style="text-align:center;">Género</th>
+                <th style="text-align:center; width:180px;">Precio a publicar</th>
+                <th style="text-align:center; width:160px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="cmp-pending-tbody">
+              <tr><td colspan="8" style="text-align:center; color:var(--text-secondary); padding:32px;">Cargando...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Panel: Historial -->
+      <div id="cmp-panel-history" style="display:none;">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Producto</th>
+                <th style="text-align:right;">Costo PS</th>
+                <th style="text-align:right;">Precio BRVN</th>
+                <th style="text-align:right;">Precio ML</th>
+                <th style="text-align:right;">Diferencia</th>
+                <th style="text-align:center;">Decisión</th>
+                <th>Fecha</th>
+              </tr>
+            </thead>
+            <tbody id="cmp-history-tbody">
+              <tr><td colspan="8" style="text-align:center; color:var(--text-secondary); padding:32px;">Ejecuta una comparación para ver el historial.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </div>
   </main>
 
 

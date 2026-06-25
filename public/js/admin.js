@@ -1,4 +1,4 @@
-let hoursChartInstance = null;
+﻿let hoursChartInstance = null;
 let genderChartInstance = null;
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1159,4 +1159,234 @@ window.deleteAdminCoupon = async function(id, code) {
     alert(`❌ Error: ${err.message}`);
   }
 };
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPARADOR DE PRECIOS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// COMPARADOR DE PRECIOS - admin.js extension
+// Este archivo se concatena al final de admin.js
+
+let cmpPollingInterval = null;
+let cmpCurrentTab = 'pending';
+
+function loadComparadorSection() {
+  loadCmpStatus();
+  loadCmpPending();
+}
+
+function showCmpTab(tab) {
+  cmpCurrentTab = tab;
+  document.getElementById('cmp-panel-pending').style.display = tab === 'pending' ? '' : 'none';
+  document.getElementById('cmp-panel-history').style.display = tab === 'history' ? '' : 'none';
+  document.getElementById('cmp-tab-pending').style.opacity = tab === 'pending' ? '1' : '0.5';
+  document.getElementById('cmp-tab-history').style.opacity = tab === 'history' ? '1' : '0.5';
+  if (tab === 'history') loadCmpHistory();
+}
+
+async function loadCmpStatus() {
+  try {
+    const token = localStorage.getItem('paps_token');
+    const res = await fetch('/api/admin/price-comparison/status', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const state = await res.json();
+    updateCmpUI(state);
+    return state;
+  } catch (err) {
+    console.error('Error cargando estado comparador:', err);
+    return null;
+  }
+}
+
+function updateCmpUI(state) {
+  var el = function(id) { return document.getElementById(id); };
+  el('cmp-published').textContent = state.published != null ? state.published : '-';
+  el('cmp-pending').textContent   = state.pendingReview != null ? state.pendingReview : '-';
+  el('cmp-rejected').textContent  = state.rejected != null ? state.rejected : '-';
+  el('cmp-progress').textContent  = state.total > 0 ? (state.processed + ' / ' + state.total) : '-';
+
+  var pct = state.total > 0 ? Math.round((state.processed / state.total) * 100) : 0;
+  el('cmp-bar').style.width = pct + '%';
+  el('cmp-pct').textContent = pct + '%';
+  el('cmp-progress-bar-container').style.display = (state.running || state.total > 0) ? '' : 'none';
+
+  if (state.currentProduct) {
+    el('cmp-current-product').textContent = 'Analizando: ' + state.currentProduct;
+  } else if (state.lastRun && !state.running) {
+    el('cmp-current-product').textContent = 'Ultima ejecucion: ' + new Date(state.lastRun).toLocaleString('es-MX');
+  }
+
+  var btn = el('run-comparador-btn');
+  if (btn) {
+    btn.disabled = !!state.running;
+    btn.innerHTML = state.running
+      ? '<i class="fa-solid fa-spinner fa-spin"></i> Comparando...'
+      : '<i class="fa-solid fa-magnifying-glass-dollar"></i> Ejecutar Comparacion';
+  }
+}
+
+async function runComparador() {
+  if (!confirm('Iniciar la comparacion de precios con Mercado Libre?\n\nEste proceso puede tardar varios minutos.')) return;
+  try {
+    var token = localStorage.getItem('paps_token');
+    var res = await fetch('/api/admin/price-comparison/run', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var data = await res.json();
+    if (data.success) {
+      clearInterval(cmpPollingInterval);
+      cmpPollingInterval = setInterval(async function() {
+        var state = await loadCmpStatus();
+        if (!state || !state.running) {
+          clearInterval(cmpPollingInterval);
+          cmpPollingInterval = null;
+          await loadCmpPending();
+          if (cmpCurrentTab === 'history') await loadCmpHistory();
+        }
+      }, 2000);
+    } else {
+      alert(data.message || data.error || "Error al ejecutar el comparador");
+    }
+  } catch (err) {
+    alert('Error al iniciar: ' + err.message);
+  }
+}
+
+async function loadCmpPending() {
+  try {
+    var token = localStorage.getItem('paps_token');
+    var res = await fetch('/api/admin/price-comparison/pending', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var data = await res.json();
+    document.getElementById('cmp-pending-badge').textContent = data.total || 0;
+
+    var tbody = document.getElementById('cmp-pending-tbody');
+    var empty = document.getElementById('cmp-pending-empty');
+    var wrap  = document.getElementById('cmp-pending-table-wrap');
+
+    if (!data.items || data.items.length === 0) {
+      empty.style.display = '';
+      wrap.style.display  = 'none';
+      return;
+    }
+    empty.style.display = 'none';
+    wrap.style.display  = '';
+
+    var genderLabel = { 'Mujer': 'Mujer', 'Hombre': 'Hombre', 'Ninos': 'Ninos', 'Unisex': 'Unisex' };
+
+    tbody.innerHTML = data.items.map(function(item) {
+      var img = (item.images && item.images.length > 0)
+        ? '<img src="' + item.images[0] + '" style="width:50px;height:50px;object-fit:cover;border-radius:6px;" onerror="this.src=\'/logo.png\'">'
+        : '<div style="width:50px;height:50px;background:#eee;border-radius:6px;"></div>';
+
+      var m = item.ps_margin;
+      var marginBadge = (m !== null && m !== undefined)
+        ? (m >= 200 ? '<span style="color:#34c759;font-weight:700;">+$' + m + ' alto</span>'
+        : m >= 100 ? '<span style="color:#ff9500;font-weight:700;">+$' + m + ' medio</span>'
+                   : '<span style="color:#ff3b30;font-weight:700;">+$' + m + ' bajo</span>')
+        : '<span style="color:#999;">N/D</span>';
+
+      var gender = genderLabel[item.gender] || item.gender || '-';
+      var brvnSugg = (item.brvn_suggested || 0).toFixed(0);
+      var brvnMin  = (item.brvn_min || 0).toFixed(0);
+
+      return '<tr id="cmp-row-' + item.id + '">'
+        + '<td>' + img + '</td>'
+        + '<td><div style="font-weight:600;font-size:13px;">' + (item.title||'-') + '</div><div style="font-size:11px;color:var(--text-secondary);">SKU: ' + item.sku + '</div></td>'
+        + '<td style="text-align:right;font-weight:600;">$' + (item.supplier_price||0).toFixed(0) + '</td>'
+        + '<td style="text-align:right;color:#007aff;font-weight:700;">$' + brvnSugg + '</td>'
+        + '<td style="text-align:right;">' + marginBadge + '</td>'
+        + '<td style="text-align:center;font-size:12px;">' + gender + '</td>'
+        + '<td style="text-align:center;"><input type="number" id="price-input-' + item.id + '" value="' + brvnSugg + '" min="' + brvnMin + '" style="width:100px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;text-align:right;"></td>'
+        + '<td style="text-align:center;"><div style="display:flex;gap:6px;justify-content:center;">'
+        + '<button onclick="approveCmpProduct(\'' + item.id + '\')" style="padding:6px 12px;background:#34c759;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Publicar</button>'
+        + '<button onclick="rejectCmpProduct(\'' + item.id + '\')" style="padding:6px 10px;background:#ff3b30;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">X</button>'
+        + '</div></td>'
+        + '</tr>';
+    }).join('');
+  } catch (err) { console.error('Error cargando revision manual:', err); }
+}
+
+async function approveCmpProduct(productId) {
+  var priceEl = document.getElementById('price-input-' + productId);
+  var price = priceEl ? parseFloat(priceEl.value) : 0;
+  if (!price || price <= 0) { alert('Ingresa un precio valido antes de publicar.'); return; }
+  try {
+    var token = localStorage.getItem('paps_token');
+    var res = await fetch('/api/admin/price-comparison/approve/' + productId, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price: price })
+    });
+    var data = await res.json();
+    if (data.success) {
+      var row = document.getElementById('cmp-row-' + productId);
+      if (row) { row.style.opacity='0.4'; row.style.pointerEvents='none'; row.cells[row.cells.length-1].innerHTML='<span style="color:#34c759;font-weight:600;">Publicado: ' + data.category + '</span>'; }
+      setTimeout(loadCmpPending, 1000);
+    } else { alert(data.error); }
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+async function rejectCmpProduct(productId) {
+  if (!confirm('Rechazar este producto?')) return;
+  try {
+    var token = localStorage.getItem('paps_token');
+    await fetch('/api/admin/price-comparison/reject/' + productId, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: 'Rechazado manualmente' })
+    });
+    var row = document.getElementById('cmp-row-' + productId);
+    if (row) row.remove();
+    loadCmpPending();
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+async function loadCmpHistory() {
+  try {
+    var token = localStorage.getItem('paps_token');
+    var res = await fetch('/api/admin/price-comparison/results?limit=150', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var data = await res.json();
+    var tbody = document.getElementById('cmp-history-tbody');
+    if (!data.items || data.items.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-secondary);padding:32px;">Sin historial. Ejecuta una comparacion primero.</td></tr>';
+      return;
+    }
+    var statusLabel = {
+      'auto_published':  '<span style="color:#34c759;font-weight:700;">Auto-publicado</span>',
+      'manual_approved': '<span style="color:#007aff;font-weight:700;">Aprobado</span>',
+      'rejected':        '<span style="color:#ff3b30;font-weight:700;">Rechazado</span>',
+      'pending_review':  '<span style="color:#ff9500;font-weight:700;">En revision</span>'
+    };
+    tbody.innerHTML = data.items.map(function(item) {
+      var diff = item.ml_price ? Math.round((item.brvn_price||0) - item.ml_price) : null;
+      var diffStr = diff !== null
+        ? (diff <= 0 ? '<span style="color:#34c759;font-weight:600;">$' + Math.abs(diff) + ' mas barato</span>'
+                     : '<span style="color:' + (diff<=100?'#ff9500':'#ff3b30') + ';font-weight:600;">$' + diff + ' mas caro</span>')
+        : '<span style="color:#999;">N/D</span>';
+      var mlLink = item.ml_url
+        ? '<a href="' + item.ml_url + '" target="_blank" style="color:#ff9500;text-decoration:none;">$' + (item.ml_price||0).toFixed(0) + '</a>'
+        : '<span style="color:#999;">No encontrado</span>';
+      var date = item.compared_at
+        ? new Date(item.compared_at).toLocaleDateString('es-MX',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})
+        : '-';
+      return '<tr>'
+        + '<td style="font-size:11px;color:var(--text-secondary);">' + item.sku + '</td>'
+        + '<td style="font-size:13px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (item.title||'-') + '</td>'
+        + '<td style="text-align:right;">$' + (item.supplier_price||0).toFixed(0) + '</td>'
+        + '<td style="text-align:right;font-weight:700;color:#007aff;">$' + (item.brvn_price ? item.brvn_price.toFixed(0) : '-') + '</td>'
+        + '<td style="text-align:right;">' + mlLink + '</td>'
+        + '<td style="text-align:right;">' + diffStr + '</td>'
+        + '<td style="text-align:center;">' + (statusLabel[item.status]||item.status) + '</td>'
+        + '<td style="font-size:11px;color:var(--text-secondary);">' + date + '</td>'
+        + '</tr>';
+    }).join('');
+  } catch (err) { console.error('Error cargando historial:', err); }
+}
 

@@ -150,6 +150,41 @@ async function initializeDatabase() {
       // column likely already exists
     }
 
+    // Migration: add comparison_status for price comparator
+    try {
+      await dbQuery.run("ALTER TABLE products ADD COLUMN comparison_status TEXT DEFAULT NULL");
+      console.log('Migrated: comparison_status column added to products.');
+    } catch (e) {
+      // column likely already exists
+    }
+
+    // Migration: add ps_public_price (precio al público en Price Shoes)
+    try {
+      await dbQuery.run("ALTER TABLE products ADD COLUMN ps_public_price REAL DEFAULT NULL");
+      console.log('Migrated: ps_public_price column added to products.');
+    } catch (e) {
+      // column likely already exists
+    }
+
+    // Create price_comparisons table
+    await dbQuery.run(`
+      CREATE TABLE IF NOT EXISTS price_comparisons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id TEXT NOT NULL,
+        sku TEXT NOT NULL,
+        brvn_price REAL,
+        ml_price REAL,
+        ml_url TEXT,
+        ml_title TEXT,
+        status TEXT DEFAULT 'pending_review',
+        rejection_reason TEXT,
+        compared_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT,
+        FOREIGN KEY (product_id) REFERENCES products(id)
+      )
+    `);
+    console.log('price_comparisons table verified/created.');
+
     // Populate brand field for existing products if null
     try {
       const unpopulated = await dbQuery.all("SELECT id, title, origin FROM products WHERE brand IS NULL");

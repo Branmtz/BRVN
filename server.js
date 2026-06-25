@@ -4,6 +4,13 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { dbQuery } = require('./database');
 const { runScraper, verifyLiveStock, syncSingleProductLive } = require('./scraper');
+const {
+  runBulkComparison,
+  getComparisonState,
+  approveManualProduct,
+  rejectManualProduct,
+  calculateBRVNPrice
+} = require('./price-comparator');
 require('dotenv').config();
 
 const app = express();
@@ -44,17 +51,53 @@ function rateLimiter(limit, windowMs) {
 // Si el precio del proveedor es 0, el precio de venta es 0
 // Productos propios con precio fijo (Picafresa, supplier_price < 100): precio directo
 // Fórmula: (costo + $300 ganancia + $160 envío incluido + comisión fija MP c/IVA) / (1 - % comisión MP)
+/**
+ * Fórmula de precio BRVN:
+ *   precio = (supplier_price + $200 ganancia + $100 envío) / (1 - 0.034 comisión MP)
+ * Redondeo psicológico: sube al siguiente múltiplo de 50 y resta 1.
+ *   Ej: 1,243 → 1,250 - 1 = $1,249
+ */
 function calculatePrice(supplierPrice) {
-  if (supplierPrice === 0) return 0;
-  // Productos propios con precio fijo (Picafresa, supplier_price < 100): precio directo
+  if (!supplierPrice || supplierPrice <= 0) return 0;
+  // Productos propios con precio fijo (supplier_price < 100): precio directo
   if (supplierPrice < 100) return supplierPrice;
-  // Fórmula: (costo + $300 ganancia + $160 envío incluido + comisión fija MP c/IVA) / (1 - % comisión MP)
-  const sumaBase = supplierPrice + 300 + 160;
-  const comisionFijaConIva = 4.64;
-  const factorPorcentaje = 0.95952; // 1 - 0.04048
-  const precioFinal = (sumaBase + comisionFijaConIva) / factorPorcentaje;
-  return Math.round(precioFinal * 100) / 100;
+  const raw = (supplierPrice + 200 + 100) / (1 - 0.034);
+  // Redondeo psicológico: siguiente múltiplo de 50, menos 1
+  return Math.ceil(raw / 50) * 50 - 1;
 }
+
+// ─────────────────────────────────────────────
+// Filtro SQL global: solo tenis, sin mocasines ni marcas excluidas
+// ─────────────────────────────────────────────
+
+// Productos que SÍ son tenis (por título o subcategoría)
+const TENIS_BASE_SQL = `(
+  UPPER(title) LIKE '%TENIS%'
+  OR UPPER(title) LIKE '%SPORT%'
+  OR UPPER(specifications) LIKE '%"subcategor\u00eda":"correr"%'
+  OR UPPER(specifications) LIKE '%"subcategor\u00eda":"skate"%'
+  OR UPPER(specifications) LIKE '%"subcategor\u00eda":"futbol"%'
+  OR UPPER(specifications) LIKE '%"subcategor\u00eda":"entrenamiento"%'
+  OR UPPER(specifications) LIKE '%"subcategor\u00eda":"basketball"%'
+  OR UPPER(specifications) LIKE '%"subcategor\u00eda":"padel"%'
+  OR UPPER(specifications) LIKE '%"subcategor\u00eda":"caminar"%'
+)`;
+
+// Productos a excluir: mocasín, marcas SHOSH/MANET, subcategoría choclo
+// EXCEPTO si el título dice TENIS o SPORT (en ese caso se conservan)
+const EXCLUIR_SQL = `NOT (
+  (
+    UPPER(title) LIKE '%MOCASIN%'
+    OR UPPER(title) LIKE '%MOCAS\u00cdN%'
+    OR UPPER(brand) IN ('SHOSH','MANET')
+    OR UPPER(specifications) LIKE '%"subcategor\u00eda":"choclo"%'
+  )
+  AND UPPER(title) NOT LIKE '%TENIS%'
+  AND UPPER(title) NOT LIKE '%SPORT%'
+)`;
+
+// Filtro final combinado
+const TENIS_FILTER_SQL = `(${TENIS_BASE_SQL} AND ${EXCLUIR_SQL})`;
 
 function getProductTypeJS(p) {
   const title = (p.title || '').toUpperCase();
@@ -337,8 +380,7 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
     const { gender, page = 0, limit = 24 } = req.query;
     const offset = parseInt(page) * parseInt(limit);
 
-    // Build WHERE clause with proper params array
-    let whereClauses = ["status = 'active'"];
+    let whereClauses = ["status = 'active'", TENIS_FILTER_SQL];
     const params = [];
 
     if (gender && gender !== 'all') {
@@ -503,9 +545,14 @@ app.get('/api/categories', async (req, res) => {
   try {
     let rows;
     if (gender) {
-      rows = await dbQuery.all("SELECT DISTINCT category FROM products WHERE status = 'active' AND category IS NOT NULL AND gender = ?", [gender]);
+      rows = await dbQuery.all(
+        `SELECT DISTINCT category FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} AND category IS NOT NULL AND gender = ?`,
+        [gender]
+      );
     } else {
-      rows = await dbQuery.all("SELECT DISTINCT category FROM products WHERE status = 'active' AND category IS NOT NULL");
+      rows = await dbQuery.all(
+        `SELECT DISTINCT category FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} AND category IS NOT NULL`
+      );
     }
     const categories = rows.map(r => r.category);
     res.json(categories);
@@ -518,7 +565,7 @@ app.get('/api/categories', async (req, res) => {
 app.get('/api/categories/detailed', authenticateAdmin, async (req, res) => {
   try {
     const rows = await dbQuery.all(
-      "SELECT category as name, COUNT(*) as count FROM products WHERE status = 'active' AND category IS NOT NULL GROUP BY category ORDER BY category ASC"
+      `SELECT category as name, COUNT(*) as count FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} AND category IS NOT NULL GROUP BY category ORDER BY category ASC`
     );
     res.json(rows);
   } catch (err) {
@@ -530,7 +577,7 @@ app.get('/api/categories/detailed', authenticateAdmin, async (req, res) => {
 app.get('/api/brands', async (req, res) => {
   try {
     const { gender } = req.query;
-    let whereClause = "status = 'active' AND brand IS NOT NULL";
+    let whereClause = `status = 'active' AND ${TENIS_FILTER_SQL} AND brand IS NOT NULL`;
 
     if (gender && gender !== 'all') {
       if (gender === 'Hombres') {
@@ -576,17 +623,22 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
     let products;
     const salesIds = Array.from(productIdsWithSales);
     
+    // "Más vendidos": solo tenis aprobados por el admin con ventas reales
     if (salesIds.length > 0) {
       const placeholders = salesIds.map(() => '?').join(',');
-      const sql = `SELECT * FROM products WHERE status = 'active' AND (is_bestseller = 1 OR id IN (${placeholders}))`;
+      const sql = `SELECT * FROM products
+        WHERE status = 'active'
+          AND ${TENIS_FILTER_SQL}
+          AND comparison_status IN ('auto_published', 'manual_approved')
+          AND id IN (${placeholders})`;
       products = await dbQuery.all(sql, salesIds);
-    } else {
-      products = await dbQuery.all("SELECT * FROM products WHERE status = 'active' AND is_bestseller = 1");
     }
 
-    // Fallback if no bestsellers and no sales yet (e.g. fresh installation)
-    if (products.length === 0) {
-      products = await dbQuery.all("SELECT * FROM products WHERE status = 'active' LIMIT 12");
+    // Si no hay ventas aún, mostrar todos los tenis aprobados por el admin
+    if (!products || products.length === 0) {
+      products = await dbQuery.all(
+        `SELECT * FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} AND comparison_status IN ('auto_published', 'manual_approved') ORDER BY id DESC LIMIT 24`
+      );
     }
     
     // Fetch average ratings
@@ -2479,6 +2531,115 @@ async function runHourlySync() {
   }
   console.log('=== Hourly Background Sync Completed ===\n');
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRICE COMPARATOR ENDPOINTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// POST /api/admin/price-comparison/run — Lanza comparación masiva en background
+app.post('/api/admin/price-comparison/run', authenticateAdmin, (req, res) => {
+  const state = getComparisonState();
+  if (state.running) {
+    return res.json({ success: false, message: 'Ya hay una comparación en curso.', state });
+  }
+  // Lanzar en background sin bloquear la respuesta
+  runBulkComparison().catch(err => {
+    console.error('[API] Error en runBulkComparison:', err.message);
+  });
+  res.json({ success: true, message: 'Comparación iniciada en background.' });
+});
+
+// GET /api/admin/price-comparison/status — Estado en tiempo real del proceso
+app.get('/api/admin/price-comparison/status', authenticateAdmin, (req, res) => {
+  res.json(getComparisonState());
+});
+
+// GET /api/admin/price-comparison/pending — Productos en cola de revisión manual
+app.get('/api/admin/price-comparison/pending', authenticateAdmin, async (req, res) => {
+  try {
+    const pending = await dbQuery.all(`
+      SELECT
+        p.id, p.sku, p.title, p.brand, p.gender, p.supplier_price,
+        p.ps_public_price, p.images, p.specifications,
+        pc.brvn_price, pc.ml_price, pc.ml_url, pc.ml_title,
+        pc.compared_at, pc.rejection_reason,
+        pc.id AS comparison_id
+      FROM products p
+      LEFT JOIN price_comparisons pc ON pc.product_id = p.id AND pc.status = 'pending_review'
+      WHERE p.comparison_status = 'pending_review'
+      ORDER BY pc.compared_at DESC
+    `);
+
+    const enriched = pending.map(p => ({
+      ...p,
+      brvn_suggested: calculateBRVNPrice(p.supplier_price, 200),
+      brvn_min: calculateBRVNPrice(p.supplier_price, 150),
+      ps_margin: p.ps_public_price ? Math.round(p.ps_public_price - p.supplier_price) : null,
+      images: (() => { try { return JSON.parse(p.images); } catch { return []; } })()
+    }));
+
+    res.json({ success: true, total: enriched.length, items: enriched });
+  } catch (err) {
+    console.error('[API] Error cargando revisión manual:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/admin/price-comparison/results — Historial completo de comparaciones
+app.get('/api/admin/price-comparison/results', authenticateAdmin, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const status = req.query.status || null;
+
+    let sql = `
+      SELECT
+        pc.id, pc.sku, pc.brvn_price, pc.ml_price, pc.ml_url, pc.ml_title,
+        pc.status, pc.rejection_reason, pc.compared_at, pc.published_at,
+        p.title, p.brand, p.gender, p.supplier_price, p.images
+      FROM price_comparisons pc
+      LEFT JOIN products p ON p.id = pc.product_id
+    `;
+    const params = [];
+    if (status) {
+      sql += ' WHERE pc.status = ?';
+      params.push(status);
+    }
+    sql += ' ORDER BY pc.compared_at DESC LIMIT ?';
+    params.push(limit);
+
+    const results = await dbQuery.all(sql, params);
+    res.json({ success: true, total: results.length, items: results });
+  } catch (err) {
+    console.error('[API] Error cargando historial:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/admin/price-comparison/approve/:id — Aprueba y publica producto manual
+app.post('/api/admin/price-comparison/approve/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { price } = req.body;
+    const result = await approveManualProduct(id, price ? parseFloat(price) : null);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[API] Error aprobando producto:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/admin/price-comparison/reject/:id — Rechaza producto de la cola manual
+app.post('/api/admin/price-comparison/reject/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const result = await rejectManualProduct(id, reason);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[API] Error rechazando producto:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // Schedule hourly sync only if not running on Vercel
 if (!process.env.VERCEL) {
