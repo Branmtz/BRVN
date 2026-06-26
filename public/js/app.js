@@ -1322,40 +1322,222 @@ window.selectCategoryFromGrid = async function(category) {
 };
 
 /* --- Dynamic Trends Grid Panel --- */
+let trendsPage = 0;
+let trendsTotal = 0;
+let trendsIsLoading = false;
+let trendsObserver = null;
+let trendsBrand = 'all';
+let trendsType = 'all';
+let trendsKidsGender = 'all';
+const TRENDS_PAGE_SIZE = 24;
+
 async function renderTrendsGrid() {
   const gridEl = document.getElementById('trends-product-grid');
   if (!gridEl) return;
-  
+
+  // Reset state
+  trendsPage = 0;
+  trendsTotal = 0;
+  trendsIsLoading = false;
+  if (trendsObserver) { trendsObserver.disconnect(); trendsObserver = null; }
+  const oldSentinel = document.getElementById('trends-scroll-sentinel');
+  if (oldSentinel) oldSentinel.remove();
+
   gridEl.innerHTML = `
     <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-secondary);">
       <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px;"></i>
       <p>Cargando tendencias...</p>
     </div>
   `;
-  
+
+  await loadMoreTrends(gridEl, true);
+}
+
+async function loadMoreTrends(gridEl, isFirstLoad = false) {
+  if (trendsIsLoading) return;
+  trendsIsLoading = true;
+
   try {
-    const res = await fetchWithAuth('/api/products/trends');
+    const params = new URLSearchParams({
+      page: trendsPage,
+      limit: TRENDS_PAGE_SIZE
+    });
+    if (trendsBrand && trendsBrand !== 'all') params.set('brand', trendsBrand);
+    if (trendsType && trendsType !== 'all') params.set('type', trendsType);
+    if (trendsKidsGender && trendsKidsGender !== 'all') params.set('kids_gender', trendsKidsGender);
+
+    const res = await fetchWithAuth(`/api/products/trends?${params.toString()}`);
     if (!res.ok) throw new Error('Failed to fetch trends');
-    const products = await res.json();
-    
-    if (products.length === 0) {
-      gridEl.innerHTML = `
-        <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-secondary);">
-          <i class="fa-solid fa-store-slash" style="font-size: 32px; margin-bottom: 12px; color: #ccc;"></i>
-          <p>No hay productos con ventas en esta tienda todavía. ¡Sé el primero en comprar!</p>
-        </div>
-      `;
-      return;
+    const data = await res.json();
+
+    const products = data.products || [];
+    trendsTotal = data.total || 0;
+
+    if (isFirstLoad) {
+      if (products.length === 0) {
+        gridEl.innerHTML = `
+          <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-secondary);">
+            <i class="fa-solid fa-store-slash" style="font-size: 32px; margin-bottom: 12px; color: #ccc;"></i>
+            <p>No se encontraron calzados que coincidan con tu selección.</p>
+          </div>
+        `;
+        trendsIsLoading = false;
+        return;
+      }
+      // Clear loading spinner
+      if (window.innerWidth <= 768) {
+        gridEl.innerHTML = `
+          <div class="masonry-column masonry-column-left"></div>
+          <div class="masonry-column masonry-column-right"></div>
+        `;
+      } else {
+        gridEl.innerHTML = '';
+      }
     }
-    
-    renderProductListToGrid(products, gridEl);
+
+    // Remove sentinel before appending
+    const oldSentinel = document.getElementById('trends-scroll-sentinel');
+    if (oldSentinel) oldSentinel.remove();
+
+    appendTrendsBatch(products, gridEl);
+    trendsPage++;
+
+    // Add sentinel if more pages remain
+    if (trendsPage * TRENDS_PAGE_SIZE < trendsTotal) {
+      const sentinel = document.createElement('div');
+      sentinel.id = 'trends-scroll-sentinel';
+      sentinel.style.cssText = 'grid-column:1/-1; height:60px; display:flex; align-items:center; justify-content:center;';
+      sentinel.innerHTML = '<span style="font-size:12px;color:#aaa;letter-spacing:0.05em;">Cargando más...</span>';
+      gridEl.appendChild(sentinel);
+
+      if (trendsObserver) trendsObserver.disconnect();
+      trendsObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && !trendsIsLoading) {
+          loadMoreTrends(gridEl);
+        }
+      }, { rootMargin: '200px' });
+      trendsObserver.observe(sentinel);
+    }
   } catch (err) {
     console.error(err);
-    gridEl.innerHTML = '<p style="color: #ff3b30; grid-column: 1/-1;">Error al cargar las tendencias.</p>';
+    if (isFirstLoad) {
+      gridEl.innerHTML = '<p style="color: #ff3b30; grid-column: 1/-1;">Error al cargar las tendencias.</p>';
+    }
+  }
+
+  trendsIsLoading = false;
+}
+
+function appendTrendsBatch(products, gridEl) {
+  if (!products || products.length === 0) return;
+
+  const leftCol = gridEl.querySelector('.masonry-column-left');
+  const rightCol = gridEl.querySelector('.masonry-column-right');
+  const startIdx = (trendsPage) * TRENDS_PAGE_SIZE; // offset for pattern calculation
+
+  if (leftCol && rightCol && window.innerWidth <= 768) {
+    products.forEach((p, idx) => {
+      const globalIdx = startIdx + idx;
+      const imgClass = (globalIdx % 4 === 0 || globalIdx % 4 === 3) ? 'tall' : 'short';
+      const cardHtml = buildProductCard(p, imgClass);
+      if (globalIdx % 2 === 0) {
+        leftCol.insertAdjacentHTML('beforeend', cardHtml);
+      } else {
+        rightCol.insertAdjacentHTML('beforeend', cardHtml);
+      }
+    });
+  } else {
+    products.forEach(p => {
+      gridEl.insertAdjacentHTML('beforeend', buildProductCard(p));
+    });
   }
 }
 
-/* --- Customer Auth Handling --- */
+// Variables for paginated trends in category-product-grid
+let catTrendsPage = 0;
+let catTrendsTotal = 0;
+let catTrendsLoading = false;
+let catTrendsObserver = null;
+
+async function loadTrendsIntoCategoryGrid(gridEl, isFirstLoad = false) {
+  if (catTrendsLoading) return;
+  catTrendsLoading = true;
+
+  try {
+    const params = new URLSearchParams({ page: catTrendsPage, limit: 24 });
+    if (trendsBrand && trendsBrand !== 'all') params.set('brand', trendsBrand);
+    if (trendsType && trendsType !== 'all') params.set('type', trendsType);
+    if (trendsKidsGender && trendsKidsGender !== 'all') params.set('kids_gender', trendsKidsGender);
+
+    const res = await fetchWithAuth(`/api/products/trends?${params.toString()}`);
+    if (!res.ok) throw new Error('Failed to fetch trends');
+    const data = await res.json();
+
+    const products = data.products || [];
+    catTrendsTotal = data.total || 0;
+
+    if (isFirstLoad) {
+      if (products.length === 0) {
+        gridEl.innerHTML = `
+          <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-secondary);">
+            <p>No se encontraron calzados que coincidan con tu selección.</p>
+          </div>`;
+        catTrendsLoading = false;
+        return;
+      }
+      if (window.innerWidth <= 768) {
+        gridEl.innerHTML = `<div class="masonry-column masonry-column-left"></div><div class="masonry-column masonry-column-right"></div>`;
+      } else {
+        gridEl.innerHTML = '';
+      }
+    }
+
+    // Remove existing sentinel
+    const oldSentinel = document.getElementById('cat-trends-sentinel');
+    if (oldSentinel) oldSentinel.remove();
+
+    // Append products
+    const leftCol = gridEl.querySelector('.masonry-column-left');
+    const rightCol = gridEl.querySelector('.masonry-column-right');
+    const startIdx = catTrendsPage * 24;
+    if (leftCol && rightCol && window.innerWidth <= 768) {
+      products.forEach((p, idx) => {
+        const globalIdx = startIdx + idx;
+        const imgClass = (globalIdx % 4 === 0 || globalIdx % 4 === 3) ? 'tall' : 'short';
+        if (globalIdx % 2 === 0) leftCol.insertAdjacentHTML('beforeend', buildProductCard(p, imgClass));
+        else rightCol.insertAdjacentHTML('beforeend', buildProductCard(p, imgClass));
+      });
+    } else {
+      products.forEach(p => gridEl.insertAdjacentHTML('beforeend', buildProductCard(p)));
+    }
+
+    catTrendsPage++;
+
+    // Add sentinel if more pages
+    if (catTrendsPage * 24 < catTrendsTotal) {
+      const sentinel = document.createElement('div');
+      sentinel.id = 'cat-trends-sentinel';
+      sentinel.style.cssText = 'grid-column:1/-1; height:60px; display:flex; align-items:center; justify-content:center;';
+      sentinel.innerHTML = '<span style="font-size:12px;color:#aaa;letter-spacing:0.05em;">Cargando más...</span>';
+      gridEl.appendChild(sentinel);
+
+      if (catTrendsObserver) catTrendsObserver.disconnect();
+      catTrendsObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && !catTrendsLoading) {
+          loadTrendsIntoCategoryGrid(gridEl);
+        }
+      }, { rootMargin: '200px' });
+      catTrendsObserver.observe(sentinel);
+    }
+  } catch (err) {
+    console.error(err);
+    if (isFirstLoad) gridEl.innerHTML = '<p style="color:#ff3b30;grid-column:1/-1;">Error al cargar.</p>';
+  }
+
+  catTrendsLoading = false;
+}
+
+
 window.switchAuthTab = function(type) {
   document.getElementById('auth-tab-login').classList.remove('active');
   document.getElementById('auth-tab-register').classList.remove('active');
@@ -2478,10 +2660,34 @@ window.selectCategory = async function(categoryName) {
     let total = 0;
 
     if (categoryName === 'Lo más vendido') {
-      const res = await fetchWithAuth('/api/products/trends');
-      if (!res.ok) throw new Error('Failed to fetch trends');
-      products = await res.json();
-      total = products.length;
+      // Use paginated trends system
+      trendsBrand = 'all';
+      trendsType = 'all';
+      trendsKidsGender = 'all';
+
+      // Reset brand/type dropdowns for trends
+      const brandSel = document.getElementById('category-brand-select');
+      if (brandSel) {
+        // Populate with all brands
+        try {
+          const brandsRes = await fetchWithAuth('/api/brands');
+          const allBrands = brandsRes.ok ? await brandsRes.json() : [];
+          let optionsHtml = '<option value="all">Todas las Marcas</option>';
+          allBrands.forEach(b => { optionsHtml += `<option value="${b}">${b}</option>`; });
+          brandSel.innerHTML = optionsHtml;
+          brandSel.value = 'all';
+        } catch(e) { console.error(e); }
+      }
+
+      // Load first page into category-product-grid using trends API
+      catTrendsPage = 0;
+      catTrendsTotal = 0;
+      catTrendsLoading = false;
+      if (catTrendsObserver) { catTrendsObserver.disconnect(); catTrendsObserver = null; }
+      const oldSentinel2 = document.getElementById('cat-trends-sentinel');
+      if (oldSentinel2) oldSentinel2.remove();
+      await loadTrendsIntoCategoryGrid(gridEl, true);
+      return; // exit early, loadTrendsIntoCategoryGrid handles rendering
     } else {
       let url = '/api/products?limit=24&page=0';
       if (genderParam) url += `&gender=${encodeURIComponent(genderParam)}`;
@@ -2799,22 +3005,47 @@ async function fetchFilteredProducts() {
 }
 
 window.filterCategoryByBrand = async function(brand) {
+  if (currentSelectedCategory === 'Lo más vendido') {
+    trendsBrand = brand;
+    catTrendsPage = 0; catTrendsTotal = 0; catTrendsLoading = false;
+    if (catTrendsObserver) { catTrendsObserver.disconnect(); catTrendsObserver = null; }
+    const gridEl = document.getElementById('category-product-grid');
+    if (gridEl) await loadTrendsIntoCategoryGrid(gridEl, true);
+    return;
+  }
   categoryBrandFilter = brand;
   categoryCurrentPage = 0;
   await fetchFilteredProducts();
 };
 
 window.filterCategoryByType = async function(type) {
+  if (currentSelectedCategory === 'Lo más vendido') {
+    trendsType = type;
+    catTrendsPage = 0; catTrendsTotal = 0; catTrendsLoading = false;
+    if (catTrendsObserver) { catTrendsObserver.disconnect(); catTrendsObserver = null; }
+    const gridEl = document.getElementById('category-product-grid');
+    if (gridEl) await loadTrendsIntoCategoryGrid(gridEl, true);
+    return;
+  }
   categoryTypeFilter = type;
   categoryCurrentPage = 0;
   await fetchFilteredProducts();
 };
 
 window.filterCategoryByKidsGender = async function(gender) {
+  if (currentSelectedCategory === 'Lo más vendido') {
+    trendsKidsGender = gender;
+    catTrendsPage = 0; catTrendsTotal = 0; catTrendsLoading = false;
+    if (catTrendsObserver) { catTrendsObserver.disconnect(); catTrendsObserver = null; }
+    const gridEl = document.getElementById('category-product-grid');
+    if (gridEl) await loadTrendsIntoCategoryGrid(gridEl, true);
+    return;
+  }
   categoryKidsGenderFilter = gender;
   categoryCurrentPage = 0;
   await fetchFilteredProducts();
 };
+
 
 function renderCategoryProducts() {
   const gridEl = document.getElementById('category-product-grid');

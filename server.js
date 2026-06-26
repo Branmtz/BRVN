@@ -599,7 +599,7 @@ app.get('/api/brands', async (req, res) => {
   }
 });
 
-// GET Trends (Best Sellers)
+
 app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) => {
   try {
     const orders = await dbQuery.all("SELECT items FROM orders WHERE status IN ('paid', 'purchased_on_supplier', 'shipped')");
@@ -638,7 +638,7 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
     // Si no hay ventas aún, mostrar tenis activos marcados como bestseller o los más recientes
     if (!products || products.length === 0) {
       products = await dbQuery.all(
-        `SELECT * FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} ORDER BY is_bestseller DESC, id DESC LIMIT 24`
+        `SELECT * FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} ORDER BY is_bestseller DESC, id DESC`
       );
     }
     
@@ -675,8 +675,8 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
     // Filter to only include products that are marked as bestseller or have sales
     let trendsList = mappedProducts.filter(p => p.is_bestseller === 1 || p.salesCount > 0);
     if (trendsList.length === 0) {
-      // Fallback: if no bestsellers or sales yet, show top products by default (up to 12)
-      trendsList = mappedProducts.slice(0, 12);
+      // Fallback: show all active products sorted by bestseller then recency
+      trendsList = mappedProducts;
     } else {
       // Sort by bestseller status desc, then by salesCount desc
       trendsList.sort((a, b) => {
@@ -707,7 +707,13 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
       });
     }
 
-    res.json(trendsList);
+    // Pagination
+    const page  = parseInt(req.query.page  || '0', 10);
+    const limit = parseInt(req.query.limit || '24', 10);
+    const total = trendsList.length;
+    const paginated = trendsList.slice(page * limit, (page + 1) * limit);
+
+    res.json({ products: paginated, total, page, limit });
   } catch (err) {
     console.error('Trends error:', err);
     res.status(500).json({ error: 'Error al obtener tendencias.' });
