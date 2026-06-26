@@ -184,12 +184,11 @@ async function getEcatepecSizes(browser, originalUrl, fallbackSizes) {
     };
   }
   
-  const uniqueFallback = Array.from(new Set(fallbackSizes));
-  console.log(`[Scraper] No Ecatepec sizes found with stock > 0. Falling back to all catalog sizes.`);
+  console.log(`[Scraper] No Ecatepec sizes found with stock > 0. Product will be marked inactive.`);
   return {
-    sizes: uniqueFallback,
+    sizes: [],
     stock: 0,
-    sizesStock: uniqueFallback.reduce((acc, s) => ({ ...acc, [s]: 99 }), {}),
+    sizesStock: {},
     isBestseller: isBestseller
   };
 }
@@ -368,6 +367,8 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
           const existing = await dbQuery.get('SELECT id, category FROM products WHERE sku = ?', [item.sku]);
           
           if (existing) {
+            // Si stock=0 y sin tallas → marcar inactivo; si hay stock → marcar activo
+            const effectiveStatus = (item.stock === 0 && JSON.parse(item.sizes).length === 0) ? 'inactive' : 'active';
             // Update product data but PRESERVE existing category to prevent cross-category corruption
             await dbQuery.run(`
               UPDATE products SET
@@ -377,24 +378,31 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
               WHERE sku=?
             `, [
               item.title, item.description, item.supplier_price, item.ps_public_price, item.images, item.sizes, item.sizes_stock,
-              item.color, item.gender, item.original_url, item.stock, item.status, item.brand,
+              item.color, item.gender, item.original_url, item.stock, effectiveStatus, item.brand,
               item.specifications, item.is_bestseller, item.sku
             ]);
+            if (effectiveStatus === 'inactive') {
+              console.log(`[Scraper] SKU ${item.sku} marcado INACTIVO (sin stock en Ecatepec).`);
+            }
             // Don't count updates toward the limit — only new products count
           } else {
-            // Brand new product — insert with the assigned category
-            await dbQuery.run(`
-              INSERT INTO products (
-                id, sku, title, description, price, supplier_price, ps_public_price, images, sizes, sizes_stock, color, gender, origin, original_url, stock, status, category, brand, specifications, is_bestseller
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `, [
-              item.id, item.sku, item.title, item.description, null,
-              item.supplier_price, item.ps_public_price, item.images, item.sizes, item.sizes_stock, item.color, item.gender,
-              item.origin, item.original_url, item.stock, item.status, item.category, item.brand,
-              item.specifications, item.is_bestseller
-            ]);
-            totalSaved++;
-            savedOnThisPage++;
+            // Producto nuevo — solo insertar si tiene stock real en Ecatepec
+            if (item.stock === 0 && JSON.parse(item.sizes).length === 0) {
+              console.log(`[Scraper] SKU ${item.sku} omitido (nuevo sin stock en Ecatepec).`);
+            } else {
+              await dbQuery.run(`
+                INSERT INTO products (
+                  id, sku, title, description, price, supplier_price, ps_public_price, images, sizes, sizes_stock, color, gender, origin, original_url, stock, status, category, brand, specifications, is_bestseller
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `, [
+                item.id, item.sku, item.title, item.description, null,
+                item.supplier_price, item.ps_public_price, item.images, item.sizes, item.sizes_stock, item.color, item.gender,
+                item.origin, item.original_url, item.stock, item.status, item.category, item.brand,
+                item.specifications, item.is_bestseller
+              ]);
+              totalSaved++;
+              savedOnThisPage++;
+            }
           }
         } catch (dbErr) {
           console.error(`DB Error saving product SKU ${item.sku}:`, dbErr.message);
