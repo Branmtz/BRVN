@@ -625,21 +625,20 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
     let products;
     const salesIds = Array.from(productIdsWithSales);
     
-    // "Más vendidos": solo tenis aprobados por el admin con ventas reales
+    // "Más vendidos": tenis activos con ventas reales
     if (salesIds.length > 0) {
       const placeholders = salesIds.map(() => '?').join(',');
       const sql = `SELECT * FROM products
         WHERE status = 'active'
           AND ${TENIS_FILTER_SQL}
-          AND comparison_status IN ('auto_published', 'manual_approved')
           AND id IN (${placeholders})`;
       products = await dbQuery.all(sql, salesIds);
     }
 
-    // Si no hay ventas aún, mostrar todos los tenis aprobados por el admin
+    // Si no hay ventas aún, mostrar tenis activos marcados como bestseller o los más recientes
     if (!products || products.length === 0) {
       products = await dbQuery.all(
-        `SELECT * FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} AND comparison_status IN ('auto_published', 'manual_approved') ORDER BY id DESC LIMIT 24`
+        `SELECT * FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} ORDER BY is_bestseller DESC, id DESC LIMIT 24`
       );
     }
     
