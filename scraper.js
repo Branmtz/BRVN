@@ -97,13 +97,7 @@ async function getOnlineStoreSizes(browser, originalUrl, fallbackSizes) {
         const json = JSON.parse(text);
         const sizeLabel = json.size_label;
         const inventories = json.store_inventories || [];
-        // Buscar tienda virtual — probar nombres posibles que usa PS
-        const onlineInfo = inventories.find(store =>
-          store.store_name === 'Tienda virtual' ||
-          store.store_name === 'Virtual' ||
-          store.store_name === 'Tienda Virtual' ||
-          store.store_name === 'Online'
-        );
+        const onlineInfo = inventories.find(store => store.store_name === 'Tienda virtual');
         
         if (onlineInfo) {
           const qty = parseInt(onlineInfo.quantity) || 0;
@@ -114,11 +108,6 @@ async function getOnlineStoreSizes(browser, originalUrl, fallbackSizes) {
           }
         }
         processedSizes.add(sizeLabel.toString().trim());
-
-        // Log para detectar el nombre exacto de la tienda virtual en producción
-        if (inventories.length > 0) {
-          console.log(`[Scraper] Tiendas disponibles para talla ${sizeLabel}: ${inventories.map(s => s.store_name).join(', ')}`);
-        }
       } catch (e) {
         // ignore JSON parsing or other errors
       }
@@ -523,12 +512,7 @@ async function verifyLiveStock(originalUrl, size) {
           
           if (!isNaN(responseSizeFloat) && !isNaN(targetSizeFloat) && responseSizeFloat === targetSizeFloat) {
             const inventories = json.store_inventories || [];
-            const onlineInfo = inventories.find(store =>
-              store.store_name === 'Tienda virtual' ||
-              store.store_name === 'Virtual' ||
-              store.store_name === 'Tienda Virtual' ||
-              store.store_name === 'Online'
-            );
+            const onlineInfo = inventories.find(store => store.store_name === 'Tienda virtual');
             if (onlineInfo) {
               targetStoreStock = parseInt(onlineInfo.quantity) || 0;
               console.log(`[Live Stock Check] Intercepted size ${sizeLabel} for Tienda Virtual: stock = ${targetStoreStock}`);
