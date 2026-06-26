@@ -49,18 +49,20 @@ function rateLimiter(limit, windowMs) {
 
 // Helper: Calculate Dynamic Pricing
 // Si el precio del proveedor es 0, el precio de venta es 0
-// Productos propios con precio fijo (Picafresa, supplier_price < 100): precio directo
-// Fórmula: (costo + $300 ganancia + $160 envío incluido + comisión fija MP c/IVA) / (1 - % comisión MP)
+// Productos propios PAPS (Picafresa, supplier_price = 1): precio directo
+// Fórmula: (costo + $200 ganancia + $100 envío) / (1 - 0.034 comisión MP)
 /**
  * Fórmula de precio BRVN:
  *   precio = (supplier_price + $200 ganancia + $100 envío) / (1 - 0.034 comisión MP)
  * Redondeo psicológico: sube al siguiente múltiplo de 50 y resta 1.
  *   Ej: 1,243 → 1,250 - 1 = $1,249
+ * NOTA: Solo productos PAPS propios (supplier_price <= 1) usan precio directo.
+ *   Todos los demás (incluyendo PS a $99) pasan por la fórmula completa.
  */
 function calculatePrice(supplierPrice) {
   if (!supplierPrice || supplierPrice <= 0) return 0;
-  // Productos propios con precio fijo (supplier_price < 100): precio directo
-  if (supplierPrice < 100) return supplierPrice;
+  // Solo productos propios PAPS (Picafresa) con precio simbólico usan precio directo
+  if (supplierPrice <= 1) return supplierPrice;
   const raw = (supplierPrice + 200 + 100) / (1 - 0.034);
   // Redondeo psicológico: siguiente múltiplo de 50, menos 1
   return Math.ceil(raw / 50) * 50 - 1;
