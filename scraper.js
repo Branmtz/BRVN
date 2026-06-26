@@ -74,15 +74,15 @@ function normalizeColor(colorStr) {
  * Visits a product page and extracts the sizes and total stock available specifically in the "Ecatepec" store.
  * Returns only the sizes that are actually in stock (> 0 pairs) at the Ecatepec store.
  */
-async function getEcatepecSizes(browser, originalUrl, fallbackSizes) {
-  console.log(`[Scraper] Checking Ecatepec store stock for: ${originalUrl}`);
+async function getOnlineStoreSizes(browser, originalUrl, fallbackSizes) {
+  console.log(`[Scraper] Checking Tienda Virtual (online) stock for: ${originalUrl}`);
   
   const context = await browser.newContext({
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   });
   const page = await context.newPage();
   
-  const ecatepecSizes = [];
+  const onlineSizes = [];
   const processedSizes = new Set();
   const sizesStockMap = {};
   let totalStock = 0;
@@ -97,17 +97,28 @@ async function getEcatepecSizes(browser, originalUrl, fallbackSizes) {
         const json = JSON.parse(text);
         const sizeLabel = json.size_label;
         const inventories = json.store_inventories || [];
-        const ecatepecInfo = inventories.find(store => store.store_name === 'Ecatepec');
+        // Buscar tienda virtual — probar nombres posibles que usa PS
+        const onlineInfo = inventories.find(store =>
+          store.store_name === 'Tienda virtual' ||
+          store.store_name === 'Virtual' ||
+          store.store_name === 'Tienda Virtual' ||
+          store.store_name === 'Online'
+        );
         
-        if (ecatepecInfo) {
-          const qty = parseInt(ecatepecInfo.quantity) || 0;
+        if (onlineInfo) {
+          const qty = parseInt(onlineInfo.quantity) || 0;
           sizesStockMap[sizeLabel.toString().trim()] = qty;
           if (qty > 0) {
-            ecatepecSizes.push(sizeLabel.toString().trim());
+            onlineSizes.push(sizeLabel.toString().trim());
             totalStock += qty;
           }
         }
         processedSizes.add(sizeLabel.toString().trim());
+
+        // Log para detectar el nombre exacto de la tienda virtual en producción
+        if (inventories.length > 0) {
+          console.log(`[Scraper] Tiendas disponibles para talla ${sizeLabel}: ${inventories.map(s => s.store_name).join(', ')}`);
+        }
       } catch (e) {
         // ignore JSON parsing or other errors
       }
@@ -164,7 +175,7 @@ async function getEcatepecSizes(browser, originalUrl, fallbackSizes) {
       }
     }
   } catch (err) {
-    console.warn(`[Scraper] Failed to check Ecatepec stock for ${originalUrl}:`, err.message);
+    console.warn(`[Scraper] Failed to check online store stock for ${originalUrl}:`, err.message);
   } finally {
     try {
       await page.close();
@@ -172,10 +183,10 @@ async function getEcatepecSizes(browser, originalUrl, fallbackSizes) {
     } catch (e) {}
   }
 
-  if (ecatepecSizes.length > 0) {
-    const uniqueSizes = Array.from(new Set(ecatepecSizes));
+  if (onlineSizes.length > 0) {
+    const uniqueSizes = Array.from(new Set(onlineSizes));
     const finalTotalStock = uniqueSizes.reduce((sum, size) => sum + (sizesStockMap[size] || 0), 0);
-    console.log(`[Scraper] Ecatepec In-Stock sizes: ${uniqueSizes.join(', ')} (Total stock: ${finalTotalStock})`);
+    console.log(`[Scraper] Tienda Virtual in-stock sizes: ${uniqueSizes.join(', ')} (Total stock: ${finalTotalStock})`);
     return {
       sizes: uniqueSizes,
       stock: finalTotalStock,
@@ -184,7 +195,7 @@ async function getEcatepecSizes(browser, originalUrl, fallbackSizes) {
     };
   }
   
-  console.log(`[Scraper] No Ecatepec sizes found with stock > 0. Product will be marked inactive.`);
+  console.log(`[Scraper] No online store sizes found with stock > 0. Product will be marked inactive.`);
   return {
     sizes: [],
     stock: 0,
@@ -312,16 +323,16 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             ? `https://www.priceshoes.com/productos/${source.url_key}`
             : `https://www.priceshoes.com/productos/${sku}`;
           
-          // Query the Ecatepec store stock dynamically for this product
-          console.log(`[Scraper] Querying Ecatepec store stock for product: ${title} (${sku})`);
-          const ecatepecData = await getEcatepecSizes(browser, originalUrl, fallbackSizes);
-          const sizes = ecatepecData.sizes;
-          const stock = ecatepecData.stock;
-          const sizesStock = ecatepecData.sizesStock;
+          // Query the online store (Tienda Virtual) stock for this product
+          console.log(`[Scraper] Querying Tienda Virtual stock for product: ${title} (${sku})`);
+          const onlineStoreData = await getOnlineStoreSizes(browser, originalUrl, fallbackSizes);
+          const sizes = onlineStoreData.sizes;
+          const stock = onlineStoreData.stock;
+          const sizesStock = onlineStoreData.sizesStock;
           
           // Detect bestseller status from API labels/flags OR page text
           const isBestsellerFromApi = (source.bestseller === true || (Array.isArray(source.labels) && source.labels.includes('MÁS VENDIDO'))) ? 1 : 0;
-          const isBestseller = (isBestsellerFromApi || ecatepecData.isBestseller) ? 1 : 0;
+          const isBestseller = (isBestsellerFromApi || onlineStoreData.isBestseller) ? 1 : 0;
 
           const Marca = source.brand || null;
           const Modelo = source.model || null;
@@ -479,10 +490,10 @@ function findSizesInJSON(obj) {
 
 /**
  * Performs a live stock verification for a single product directly on Price Shoes
- * checks specifically for the quantity available in the "Ecatepec" store.
+ * checks specifically for the quantity available in the online store (Tienda Virtual).
  */
 async function verifyLiveStock(originalUrl, size) {
-  console.log(`[Live Stock Check] Verifying size "${size}" on: ${originalUrl} for store "Ecatepec"`);
+  console.log(`[Live Stock Check] Verifying size "${size}" on: ${originalUrl} for Tienda Virtual`);
   let browser;
   let context;
   let page;
@@ -498,7 +509,7 @@ async function verifyLiveStock(originalUrl, size) {
     let targetStoreStock = null;
     const targetSizeStr = size.toString().trim();
     
-    // Set up response listener to find Ecatepec stock
+    // Set up response listener to find Tienda Virtual stock
     page.on('response', async (response) => {
       const url = response.url();
       if (url.includes('nearby-stores/inventories/')) {
@@ -512,10 +523,15 @@ async function verifyLiveStock(originalUrl, size) {
           
           if (!isNaN(responseSizeFloat) && !isNaN(targetSizeFloat) && responseSizeFloat === targetSizeFloat) {
             const inventories = json.store_inventories || [];
-            const ecatepecInfo = inventories.find(store => store.store_name === 'Ecatepec');
-            if (ecatepecInfo) {
-              targetStoreStock = parseInt(ecatepecInfo.quantity) || 0;
-              console.log(`[Live Stock Check] Intercepted size ${sizeLabel} for Ecatepec: stock = ${targetStoreStock}`);
+            const onlineInfo = inventories.find(store =>
+              store.store_name === 'Tienda virtual' ||
+              store.store_name === 'Virtual' ||
+              store.store_name === 'Tienda Virtual' ||
+              store.store_name === 'Online'
+            );
+            if (onlineInfo) {
+              targetStoreStock = parseInt(onlineInfo.quantity) || 0;
+              console.log(`[Live Stock Check] Intercepted size ${sizeLabel} for Tienda Virtual: stock = ${targetStoreStock}`);
             }
           }
         } catch (e) {
@@ -567,7 +583,7 @@ async function verifyLiveStock(originalUrl, size) {
     
     if (targetStoreStock !== null) {
       inStock = targetStoreStock > 0;
-      console.log(`[Live Stock Check] Results for Ecatepec: stock = ${targetStoreStock}, inStock = ${inStock}`);
+      console.log(`[Live Stock Check] Results for Tienda Virtual: stock = ${targetStoreStock}, inStock = ${inStock}`);
     } else {
       // Fallback: check __NEXT_DATA__
       console.warn('[Live Stock Check] Intercept failed. Falling back to general ecommerce sizes.');
@@ -602,7 +618,7 @@ async function verifyLiveStock(originalUrl, size) {
 async function syncSingleProductLive(product) {
   if (!product || product.origin !== 'priceshoes') return null;
 
-  console.log(`[On-Demand Sync] Triggering live Ecatepec stock sync for SKU: ${product.sku} (${product.id})...`);
+  console.log(`[On-Demand Sync] Triggering live Tienda Virtual stock sync for SKU: ${product.sku} (${product.id})...`);
   let browser;
   try {
     // 1. Parse current sizes to pass as fallback sizes
@@ -617,12 +633,12 @@ async function syncSingleProductLive(product) {
     // 2. Get browser singleton
     browser = await getBrowserInstance();
 
-    // 3. Get Ecatepec Sizes
-    const ecatepecData = await getEcatepecSizes(browser, product.original_url, fallbackSizes);
+    // 3. Get online store (Tienda Virtual) sizes
+    const onlineStoreData = await getOnlineStoreSizes(browser, product.original_url, fallbackSizes);
     
-    const sizes = ecatepecData.sizes;
-    const stock = ecatepecData.stock;
-    const sizesStock = ecatepecData.sizesStock;
+    const sizes = onlineStoreData.sizes;
+    const stock = onlineStoreData.stock;
+    const sizesStock = onlineStoreData.sizesStock;
 
     // 4. Update the DB
     await dbQuery.run(`
