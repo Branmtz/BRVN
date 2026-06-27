@@ -385,11 +385,17 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
     let whereClauses = ["status = 'active'", TENIS_FILTER_SQL];
     const params = [];
 
+    // Category filter
+    if (req.query.category && req.query.category !== 'all') {
+      whereClauses.push("LOWER(category) = LOWER(?)");
+      params.push(req.query.category);
+    }
+
     if (gender && gender !== 'all') {
       if (gender === 'Hombres') {
-        whereClauses.push("(LOWER(gender) IN ('hombre','caballero','hombres') OR LOWER(category) LIKE '%hombre%' OR LOWER(category) LIKE '%caballero%')");
+        whereClauses.push("(LOWER(gender) IN ('hombre','caballero','hombres','unisex') OR LOWER(category) LIKE '%hombre%' OR LOWER(category) LIKE '%caballero%')");
       } else if (gender === 'Mujeres') {
-        whereClauses.push("(LOWER(gender) IN ('mujer','dama','mujeres') OR LOWER(category) LIKE '%mujer%' OR LOWER(category) LIKE '%dama%')");
+        whereClauses.push("(LOWER(gender) IN ('mujer','dama','mujeres','unisex') OR LOWER(category) LIKE '%mujer%' OR LOWER(category) LIKE '%dama%')");
       } else if (gender === 'Niños') {
         whereClauses.push("(LOWER(gender) IN ('ninos','nino','nina','niños','niño','niña') OR LOWER(category) LIKE '%nino%' OR LOWER(category) LIKE '%kids%' OR LOWER(category) LIKE '%infantil%')");
       }
@@ -406,48 +412,28 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
     }
 
     if (req.query.type && req.query.type !== 'all') {
-      const typeSandaliaSql = `(LOWER(title) LIKE '%sandalia%' OR LOWER(title) LIKE '%sueco%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"sandalia"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"sueco"%')`;
-      
-      const typeBotaSql = `(LOWER(title) LIKE '%bota%' 
-                OR LOWER(title) LIKE '%botin%' 
-                OR LOWER(title) LIKE '%botín%' 
-                OR LOWER(title) LIKE '%botÍn%'
-                OR LOWER(specifications) LIKE '%"subcategoría":"bota"%')`;
-      
-      const typeZapatoSql = `(LOWER(title) LIKE '%mocasin%' 
-                OR LOWER(title) LIKE '%mocasín%' 
-                OR LOWER(title) LIKE '%mocasÍn%'
-                OR LOWER(title) LIKE '%zapato%' 
-                OR LOWER(title) LIKE '%zapatilla%' 
-                OR LOWER(title) LIKE '%ballerina%' 
-                OR LOWER(title) LIKE '%alpargata%'
-                OR LOWER(specifications) LIKE '%"subcategoría":"ballerina"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"zapatilla"%')`;
-
-      const typeTenisSql = `(LOWER(title) LIKE '%tenis%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"choclo"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"correr"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"skate"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"futbol"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"entrenamiento"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"basketball"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"padel"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"caminar"%')`;
-
-      const typeOtrosSql = `(LOWER(specifications) LIKE '%"subcategoría":"accesorio de calzado"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"calcetin"%' 
-                OR LOWER(specifications) LIKE '%"subcategoría":"cuidado del zapato"%')`;
-
-      if (req.query.type === 'Sandalias') {
-        whereClauses.push(typeSandaliaSql);
-      } else if (req.query.type === 'Botas') {
-        whereClauses.push(typeBotaSql);
-      } else if (req.query.type === 'Zapato') {
-        whereClauses.push(`(${typeZapatoSql} OR (NOT ${typeSandaliaSql} AND NOT ${typeBotaSql} AND NOT ${typeTenisSql} AND NOT ${typeOtrosSql}))`);
-      } else if (req.query.type === 'Tenis') {
-        whereClauses.push(`(${typeTenisSql} AND NOT ${typeSandaliaSql} AND NOT ${typeBotaSql} AND NOT ${typeZapatoSql})`);
+      const type = req.query.type.toLowerCase();
+      if (type === 'correr') {
+        whereClauses.push("(LOWER(specifications) LIKE '%\"subcategoría\":\"correr\"%' OR LOWER(title) LIKE '%correr%' OR LOWER(title) LIKE '%running%')");
+      } else if (type === 'skate') {
+        whereClauses.push("(LOWER(specifications) LIKE '%\"subcategoría\":\"skate\"%' OR LOWER(title) LIKE '%skate%')");
+      } else if (type === 'futbol') {
+        whereClauses.push("(LOWER(specifications) LIKE '%\"subcategoría\":\"futbol\"%' OR LOWER(specifications) LIKE '%\"subcategoría\":\"fútbol\"%' OR LOWER(title) LIKE '%futbol%' OR LOWER(title) LIKE '%fútbol%' OR LOWER(title) LIKE '%soccer%')");
+      } else if (type === 'entrenamiento') {
+        whereClauses.push("(LOWER(specifications) LIKE '%\"subcategoría\":\"entrenamiento\"%' OR LOWER(title) LIKE '%entrenamiento%' OR LOWER(title) LIKE '%training%' OR LOWER(title) LIKE '%gym%')");
+      } else if (type === 'basketball') {
+        whereClauses.push("(LOWER(specifications) LIKE '%\"subcategoría\":\"basketball\"%' OR LOWER(title) LIKE '%basketball%' OR LOWER(title) LIKE '%basquet%')");
+      } else if (type === 'padel') {
+        whereClauses.push("(LOWER(specifications) LIKE '%\"subcategoría\":\"padel\"%' OR LOWER(title) LIKE '%padel%')");
+      } else if (type === 'caminar') {
+        whereClauses.push("(LOWER(specifications) LIKE '%\"subcategoría\":\"caminar\"%' OR LOWER(title) LIKE '%caminar%' OR LOWER(title) LIKE '%walking%' OR LOWER(title) LIKE '%confort%' OR LOWER(title) LIKE '%comfort%')");
+      } else if (type === 'casual') {
+        whereClauses.push("(LOWER(specifications) LIKE '%\"subcategoría\":\"choclo\"%' OR LOWER(title) LIKE '%casual%' OR LOWER(title) LIKE '%urbano%' OR LOWER(title) LIKE '%urban%' OR LOWER(title) LIKE '%calle%')");
+      } else if (type === 'sport') {
+        whereClauses.push("(LOWER(title) LIKE '%sport%' OR LOWER(title) LIKE '%deportivo%' OR LOWER(specifications) LIKE '%\"subcategoría\":\"deporte\"%')");
+      } else {
+        whereClauses.push("(LOWER(specifications) LIKE ? OR LOWER(title) LIKE ?)");
+        params.push(`%"subcategoría":"${type}"%`, `%${type}%`);
       }
     }
 
@@ -621,24 +607,15 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
       }
     });
     
-    // Query only bestsellers or products with sales
-    let products;
-    const salesIds = Array.from(productIdsWithSales);
-    
-    // "Más vendidos": tenis activos con ventas reales
-    if (salesIds.length > 0) {
-      const placeholders = salesIds.map(() => '?').join(',');
-      const sql = `SELECT * FROM products
-        WHERE status = 'active'
-          AND ${TENIS_FILTER_SQL}
-          AND id IN (${placeholders})`;
-      products = await dbQuery.all(sql, salesIds);
-    }
+    // Query only bestsellers
+    let products = await dbQuery.all(
+      `SELECT * FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} AND is_bestseller = 1 ORDER BY id DESC`
+    );
 
-    // Si no hay ventas aún, mostrar tenis activos marcados como bestseller o los más recientes
+    // Fallback if no bestsellers found (e.g. fresh installation)
     if (!products || products.length === 0) {
       products = await dbQuery.all(
-        `SELECT * FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} ORDER BY is_bestseller DESC, id DESC`
+        `SELECT * FROM products WHERE status = 'active' AND ${TENIS_FILTER_SQL} ORDER BY id DESC LIMIT 100`
       );
     }
     
@@ -672,22 +649,9 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
       };
     });
     
-    // Filter to only include products that are marked as bestseller or have sales
-    let trendsList = mappedProducts.filter(p => p.is_bestseller === 1 || p.salesCount > 0);
-    if (trendsList.length === 0) {
-      // Fallback: show all active products sorted by bestseller then recency
-      trendsList = mappedProducts;
-    } else {
-      // Sort by bestseller status desc, then by salesCount desc
-      trendsList.sort((a, b) => {
-        const bestA = a.is_bestseller || 0;
-        const bestB = b.is_bestseller || 0;
-        if (bestB !== bestA) {
-          return bestB - bestA;
-        }
-        return b.salesCount - a.salesCount;
-      });
-    }
+    let trendsList = mappedProducts;
+    // Sort by salesCount desc
+    trendsList.sort((a, b) => b.salesCount - a.salesCount);
     
     if (req.query.brand && req.query.brand !== 'all') {
       trendsList = trendsList.filter(p => p.brand === req.query.brand);

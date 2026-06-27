@@ -142,8 +142,8 @@ async function getOnlineStoreSizes(browser, originalUrl, fallbackSizes) {
 
     await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
     
-    // Check if the page contains a "MÁS VENDIDO" text banner
-    const bestsellerCount = await page.locator('text=/(MÁS|MAS)\\s+VENDIDO/i').count();
+    // Check if the page contains a "MÁS VENDIDOS" or "MÁS VENDIDO" text banner
+    const bestsellerCount = await page.locator('text=/(MÁS|MAS)\\s+VENDIDO(S)?/i').count();
     if (bestsellerCount > 0) {
       isBestseller = 1;
     }
@@ -320,8 +320,11 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
           const sizesStock = onlineStoreData.sizesStock;
           
           // Detect bestseller status from API labels/flags OR page text
-          const isBestsellerFromApi = (source.bestseller === true || (Array.isArray(source.labels) && source.labels.includes('MÁS VENDIDO'))) ? 1 : 0;
-          const isBestseller = (isBestsellerFromApi || onlineStoreData.isBestseller) ? 1 : 0;
+          const hasBestsellerLabel = (source.bestseller === true) || (Array.isArray(source.labels) && source.labels.some(label => {
+            const l = label.toString().toUpperCase();
+            return l.includes('MÁS VENDIDO') || l.includes('MAS VENDIDO') || l.includes('MÁS VENDIDOS') || l.includes('MAS VENDIDOS');
+          }));
+          const isBestseller = (hasBestsellerLabel || onlineStoreData.isBestseller) ? 1 : 0;
 
           const Marca = source.brand || null;
           const Modelo = source.model || null;

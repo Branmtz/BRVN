@@ -227,7 +227,7 @@ function buildProductCard(p, imgClass = '') {
       </span>
       ${(p.is_bestseller === 1 || p.is_bestseller === true || p.is_bestseller === '1') ? `
       <span class="bestseller-tag">
-        <i class="fa-solid fa-fire"></i> Más Vendido
+        <i class="fa-solid fa-fire"></i> MÁS VENDIDOS
       </span>
       ` : ''}
       <div class="product-image-container ${imgClass}">
@@ -416,7 +416,10 @@ function applyFilters(searchQuery, gender, category, brand) {
                           (p.brand && p.brand.toLowerCase().includes(searchQuery)) ||
                           (p.sku && p.sku.toLowerCase().includes(searchQuery)) ||
                           (p.id && String(p.id).toLowerCase().includes(searchQuery));
-    const matchesGender = gender === 'all' || p.gender === gender;
+    const matchesGender = gender === 'all' || 
+                          (gender === 'Hombre' && (p.gender === 'Hombre' || p.gender === 'Unisex')) ||
+                          (gender === 'Mujer' && (p.gender === 'Mujer' || p.gender === 'Unisex')) ||
+                          (gender === 'Niños' && p.gender === 'Niños');
     const matchesCategory = category === 'all' || p.category === category;
     const matchesBrand = brand === 'all' || p.brand === brand;
     return matchesSearch && matchesGender && matchesCategory && matchesBrand;
@@ -2649,8 +2652,18 @@ window.selectCategory = async function(categoryName) {
   // Map category name to gender param for API
   const genderMap = {
     'Mujeres': 'Mujeres',
+    'Mujer': 'Mujeres',
+    'Dama': 'Mujeres',
+    'dama': 'Mujeres',
     'Hombres': 'Hombres',
-    'Niños': 'Niños'
+    'Hombre': 'Hombres',
+    'caballero': 'Hombres',
+    'Caballero': 'Hombres',
+    'Niños': 'Niños',
+    'Niño': 'Niños',
+    'Niña': 'Niños',
+    'Kids': 'Niños',
+    'kids': 'Niños'
   };
   const genderParam = genderMap[categoryName];
 
@@ -2659,7 +2672,7 @@ window.selectCategory = async function(categoryName) {
     let hasMore = false;
     let total = 0;
 
-    if (categoryName === 'Lo más vendido') {
+    if (categoryName === 'Lo más vendido' || categoryName === 'Más Vendidos' || categoryName === 'Más vendidos') {
       // Use paginated trends system
       trendsBrand = 'all';
       trendsType = 'all';
@@ -2690,7 +2703,11 @@ window.selectCategory = async function(categoryName) {
       return; // exit early, loadTrendsIntoCategoryGrid handles rendering
     } else {
       let url = '/api/products?limit=24&page=0';
-      if (genderParam) url += `&gender=${encodeURIComponent(genderParam)}`;
+      if (genderParam) {
+        url += `&gender=${encodeURIComponent(genderParam)}`;
+      } else if (categoryName && categoryName !== 'all') {
+        url += `&category=${encodeURIComponent(categoryName)}`;
+      }
 
       const res = await fetchWithAuth(url);
       if (!res.ok) throw new Error('Failed to fetch');
@@ -2772,7 +2789,12 @@ function setupServerPaginationObserver(genderParam, nextPage, total) {
     sentinel.remove();
 
     try {
-      let url = `/api/products?limit=24&page=${nextPage}&gender=${encodeURIComponent(genderParam)}`;
+      let url = `/api/products?limit=24&page=${nextPage}`;
+      if (genderParam && genderParam !== 'undefined') {
+        url += `&gender=${encodeURIComponent(genderParam)}`;
+      } else if (currentSelectedCategory && currentSelectedCategory !== 'all') {
+        url += `&category=${encodeURIComponent(currentSelectedCategory)}`;
+      }
       if (categoryBrandFilter && categoryBrandFilter !== 'all') {
         url += `&brand=${encodeURIComponent(categoryBrandFilter)}`;
       }
@@ -2835,23 +2857,22 @@ function getProductTypeJS(p) {
   if (p.specifications) {
     try {
       const specs = typeof p.specifications === 'string' ? JSON.parse(p.specifications) : p.specifications;
-      if (specs.Subcategoría) subcat = specs.Subcategoría.toUpperCase();
+      const rawSub = specs.Subcategoría || specs.subcategoría;
+      if (rawSub) subcat = rawSub.toUpperCase();
     } catch(e) {}
   }
   
-  if (title.includes('TENIS') || ['CHOCLO', 'CORRER', 'SKATE', 'FUTBOL', 'ENTRENAMIENTO', 'BASKETBALL', 'PADEL', 'CAMINAR'].includes(subcat)) {
-    return 'Tenis';
-  }
-  if (title.includes('SANDALIA') || title.includes('SUECO') || ['SANDALIA', 'SUECO'].includes(subcat)) {
-    return 'Sandalias';
-  }
-  if (title.includes('BOTA') || subcat === 'BOTA') {
-    return 'Botas';
-  }
-  if (subcat === 'ACCESORIO DE CALZADO' || subcat === 'CALCETIN' || subcat === 'CUIDADO DEL ZAPATO') {
-    return 'Otros';
-  }
-  return 'Zapato';
+  if (subcat === 'CORRER' || title.includes('CORRER') || title.includes('RUNNING')) return 'correr';
+  if (subcat === 'SKATE' || title.includes('SKATE')) return 'skate';
+  if (subcat === 'FUTBOL' || subcat === 'FÚTBOL' || title.includes('FUTBOL') || title.includes('FÚTBOL') || title.includes('SOCCER')) return 'futbol';
+  if (subcat === 'ENTRENAMIENTO' || title.includes('ENTRENAMIENTO') || title.includes('TRAINING') || title.includes('GYM')) return 'entrenamiento';
+  if (subcat === 'BASKETBALL' || title.includes('BASKETBALL') || title.includes('BASQUET')) return 'basketball';
+  if (subcat === 'PADEL' || title.includes('PADEL')) return 'padel';
+  if (subcat === 'CAMINAR' || title.includes('CAMINAR') || title.includes('WALKING') || title.includes('CONFORT') || title.includes('COMFORT')) return 'caminar';
+  if (subcat === 'CHOCLO' || title.includes('CASUAL') || title.includes('URBANO') || title.includes('URBAN') || title.includes('CALLE')) return 'casual';
+  if (title.includes('SPORT') || title.includes('DEPORTIVO') || subcat === 'DEPORTE') return 'sport';
+  
+  return 'casual'; // default fallback for tennis
 }
 
 function getKidsGenderJS(p) {
@@ -2930,12 +2951,23 @@ function applyCategoryFilters(baseProducts) {
 async function fetchFilteredProducts() {
   const genderMap = {
     'Mujeres': 'Mujeres',
+    'Mujer': 'Mujeres',
+    'Dama': 'Mujeres',
+    'dama': 'Mujeres',
     'Hombres': 'Hombres',
-    'Niños': 'Niños'
+    'Hombre': 'Hombres',
+    'caballero': 'Hombres',
+    'Caballero': 'Hombres',
+    'Niños': 'Niños',
+    'Niño': 'Niños',
+    'Niña': 'Niños',
+    'Kids': 'Niños',
+    'kids': 'Niños'
   };
   const genderParam = genderMap[currentSelectedCategory];
+  const isGenderCategory = !!genderParam;
 
-  if (genderParam) {
+  if (isGenderCategory || (currentSelectedCategory && currentSelectedCategory !== 'all')) {
     // Show loading state immediately
     const gridEl = document.getElementById('category-product-grid');
     if (gridEl) {
@@ -2953,7 +2985,11 @@ async function fetchFilteredProducts() {
       let total = 0;
 
       let url = '/api/products?limit=24&page=0';
-      url += `&gender=${encodeURIComponent(genderParam)}`;
+      if (genderParam) {
+        url += `&gender=${encodeURIComponent(genderParam)}`;
+      } else {
+        url += `&category=${encodeURIComponent(currentSelectedCategory)}`;
+      }
       if (categoryBrandFilter && categoryBrandFilter !== 'all') {
         url += `&brand=${encodeURIComponent(categoryBrandFilter)}`;
       }
@@ -2987,7 +3023,7 @@ async function fetchFilteredProducts() {
 
       // Setup infinite scroll to load more pages from server
       if (hasMore) {
-        setupServerPaginationObserver(genderParam, 1, total);
+        setupServerPaginationObserver(genderParam ? genderParam : 'undefined', 1, total);
       }
     } catch (err) {
       console.error(err);
