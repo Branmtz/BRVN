@@ -123,28 +123,18 @@ async function syncBestsellersFromOrders() {
     // Update in-memory map
     globalSalesMap = salesMap;
 
-    // Only mark as bestseller products that are in the top 20% by sales
-    // AND have sold at least 2 units — to keep the badge meaningful
-    const MIN_UNITS_SOLD = 2;
-    const soldEntries = Object.entries(salesMap)
-      .filter(([, qty]) => qty >= MIN_UNITS_SOLD)
-      .sort((a, b) => b[1] - a[1]); // desc by sales
-
-    const topCount = Math.max(1, Math.ceil(soldEntries.length * 0.2));
-    const topIds = soldEntries.slice(0, topCount).map(([id]) => id);
-
-    // Reset all first, then mark only the top sellers
-    await dbQuery.run(`UPDATE products SET is_bestseller = 0`);
-    if (topIds.length > 0) {
-      const placeholders = topIds.map(() => '?').join(',');
-      await dbQuery.run(`UPDATE products SET is_bestseller = 1 WHERE id IN (${placeholders})`, topIds);
+    // Mark products with real sales as bestseller in DB; clear ones without
+    const soldIds = Object.keys(salesMap);
+    if (soldIds.length > 0) {
+      const placeholders = soldIds.map(() => '?').join(',');
+      await dbQuery.run(`UPDATE products SET is_bestseller = 1 WHERE id IN (${placeholders})`, soldIds);
+      await dbQuery.run(`UPDATE products SET is_bestseller = 0 WHERE id NOT IN (${placeholders})`, soldIds);
     }
-    console.log(`[Bestsellers] Synced: ${topIds.length} products marked as bestseller (top 20% of ${soldEntries.length} with ≥${MIN_UNITS_SOLD} sales).`);
+    console.log(`[Bestsellers] Synced: ${soldIds.length} products marked as bestseller.`);
   } catch(err) {
     console.error('[Bestsellers] Sync error:', err.message);
   }
 }
-
 
 function getProductTypeJS(p) {
   const title = (p.title || '').toUpperCase();
