@@ -225,11 +225,12 @@ function buildProductCard(p, imgClass = '') {
       <span class="origin-tag ${p.origin}">
         ${originText}
       </span>
-      ${(p.is_bestseller === 1 || p.is_bestseller === true || p.is_bestseller === '1') ? `
+      ${(p.is_bestseller === 1 || p.is_bestseller === true || p.is_bestseller === '1' || p.salesCount > 0) ? `
       <span class="bestseller-tag">
         <i class="fa-solid fa-fire"></i> Más Vendido
       </span>
       ` : ''}
+
       <div class="product-image-container ${imgClass}">
         <img src="${mainImg}" alt="${p.title}" loading="lazy">
       </div>

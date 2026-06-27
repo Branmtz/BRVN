@@ -101,6 +101,41 @@ const EXCLUIR_SQL = `NOT (
 // Filtro final combinado
 const TENIS_FILTER_SQL = `(${TENIS_BASE_SQL} AND ${EXCLUIR_SQL})`;
 
+// ─────────────────────────────────────────────
+// In-memory sales map: productId -> totalUnitsSold
+// Refreshed at startup and after each paid order
+// ─────────────────────────────────────────────
+let globalSalesMap = {};
+
+async function syncBestsellersFromOrders() {
+  try {
+    const orders = await dbQuery.all("SELECT items FROM orders WHERE status IN ('paid', 'purchased_on_supplier', 'shipped')");
+    const salesMap = {};
+    orders.forEach(order => {
+      try {
+        const items = JSON.parse(order.items || '[]');
+        items.forEach(item => {
+          if (item.id) salesMap[item.id] = (salesMap[item.id] || 0) + (item.qty || 1);
+        });
+      } catch(e) {}
+    });
+
+    // Update in-memory map
+    globalSalesMap = salesMap;
+
+    // Mark products with real sales as bestseller in DB; clear ones without
+    const soldIds = Object.keys(salesMap);
+    if (soldIds.length > 0) {
+      const placeholders = soldIds.map(() => '?').join(',');
+      await dbQuery.run(`UPDATE products SET is_bestseller = 1 WHERE id IN (${placeholders})`, soldIds);
+      await dbQuery.run(`UPDATE products SET is_bestseller = 0 WHERE id NOT IN (${placeholders})`, soldIds);
+    }
+    console.log(`[Bestsellers] Synced: ${soldIds.length} products marked as bestseller.`);
+  } catch(err) {
+    console.error('[Bestsellers] Sync error:', err.message);
+  }
+}
+
 function getProductTypeJS(p) {
   const title = (p.title || '').toUpperCase();
   let subcat = '';
@@ -250,6 +285,9 @@ async function handleOrderPaymentSuccess(orderId, paymentId) {
       
       // 3. Send WhatsApp Alert
       await sendWhatsAppAlert(orderId, order.customer_name, order.total, items);
+
+      // 4. Refresh bestseller map so new sale is reflected immediately
+      syncBestsellersFromOrders().catch(e => console.error('[Bestsellers] Post-payment sync error:', e.message));
     }
   } catch (err) {
     console.error(`Error processing payment success for order ${orderId}:`, err.message);
@@ -525,7 +563,8 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
       images: JSON.parse(p.images || '[]'),
       sizes: JSON.parse(p.sizes || '[]'),
       isFavorite: customerId ? favoriteIds.has(p.id) : false,
-      rating: ratingsMap[p.id] || { average: 0, count: 0 }
+      rating: ratingsMap[p.id] || { average: 0, count: 0 },
+      salesCount: globalSalesMap[p.id] || 0
     }));
 
     res.json({
@@ -2659,7 +2698,14 @@ if (!process.env.VERCEL) {
   // Start server
   app.listen(PORT, () => {
     console.log(`PAPS store server running securely at http://localhost:${PORT}`);
+    // Auto-sync bestsellers from real order data on startup
+    syncBestsellersFromOrders();
   });
+}
+
+// On production (Vercel / Railway) also sync on cold start
+if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
+  syncBestsellersFromOrders();
 }
 
 // Export the Express app for Vercel Serverless Functions
