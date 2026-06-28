@@ -329,19 +329,18 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             continue;
           }
           
-          // Query the online store (Tienda Virtual) stock for this product
-          console.log(`[Scraper] Querying Tienda Virtual stock for product: ${title} (${sku})`);
-          const onlineStoreData = await getOnlineStoreSizes(browser, originalUrl, fallbackSizes);
-          const sizes = onlineStoreData.sizes;
-          const stock = onlineStoreData.stock;
-          const sizesStock = onlineStoreData.sizesStock;
+          // Skip online store stock verification based on user request.
+          // Real-time stock will be fetched on demand when clicking "Ver más".
+          const sizes = fallbackSizes;
+          const stock = 0;
+          const sizesStock = {};
           
-          // Detect bestseller status from API labels/flags OR page text
+          // Detect bestseller status from API labels/flags
           const hasBestsellerLabel = (source.bestseller === true) || (Array.isArray(source.labels) && source.labels.some(label => {
             const l = label.toString().toUpperCase();
             return l.includes('MÁS VENDIDO') || l.includes('MAS VENDIDO') || l.includes('MÁS VENDIDOS') || l.includes('MAS VENDIDOS');
           }));
-          const isBestseller = (hasBestsellerLabel || onlineStoreData.isBestseller) ? 1 : 0;
+          const isBestseller = hasBestsellerLabel ? 1 : 0;
 
           const Marca = source.brand || null;
           const Modelo = source.model || null;
