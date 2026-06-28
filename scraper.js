@@ -97,7 +97,10 @@ async function getOnlineStoreSizes(browser, originalUrl, fallbackSizes) {
         const json = JSON.parse(text);
         const sizeLabel = json.size_label;
         const inventories = json.store_inventories || [];
-        const onlineInfo = inventories.find(store => store.store_name === 'Tienda virtual');
+        const onlineInfo = inventories.find(store => {
+          const name = (store.store_name || '').toLowerCase().trim();
+          return name === 'tienda virtual' || name === 'ecommerce';
+        });
         
         if (onlineInfo) {
           const qty = parseInt(onlineInfo.quantity) || 0;
@@ -158,7 +161,7 @@ async function getOnlineStoreSizes(browser, originalUrl, fallbackSizes) {
       
       // Wait for responses (up to 4.5 seconds or until we processed all fallback sizes)
       const startTime = Date.now();
-      const expectedCount = fallbackSizes.length;
+      const expectedCount = fallbackSizes.length > 0 ? fallbackSizes.length : 12;
       while (processedSizes.size < expectedCount && Date.now() - startTime < 4500) {
         await page.waitForTimeout(150);
       }
@@ -531,7 +534,10 @@ async function verifyLiveStock(originalUrl, size) {
           
           if (!isNaN(responseSizeFloat) && !isNaN(targetSizeFloat) && responseSizeFloat === targetSizeFloat) {
             const inventories = json.store_inventories || [];
-            const onlineInfo = inventories.find(store => store.store_name === 'Tienda virtual');
+            const onlineInfo = inventories.find(store => {
+              const name = (store.store_name || '').toLowerCase().trim();
+              return name === 'tienda virtual' || name === 'ecommerce';
+            });
             if (onlineInfo) {
               targetStoreStock = parseInt(onlineInfo.quantity) || 0;
               console.log(`[Live Stock Check] Intercepted size ${sizeLabel} for Tienda Virtual: stock = ${targetStoreStock}`);
