@@ -312,6 +312,23 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             ? `https://www.priceshoes.com/productos/${source.url_key}`
             : `https://www.priceshoes.com/productos/${sku}`;
           
+          // Check if the product is a tennis product before querying stock
+          const hitBrand = source.brand || '';
+          const hitSubcat = source.subcategory || '';
+          const tTitle = title.toUpperCase();
+          const tBrand = hitBrand.toUpperCase();
+          const tSubcat = hitSubcat.toUpperCase();
+          const isTenisBase = tTitle.includes('TENIS') || 
+                              tTitle.includes('SPORT') || 
+                              ['CORRER', 'SKATE', 'FUTBOL', 'FÚTBOL', 'ENTRENAMIENTO', 'BASKETBALL', 'PADEL', 'PÁDEL', 'CAMINAR'].includes(tSubcat);
+          const isExcluido = (tTitle.includes('MOCASIN') || tTitle.includes('MOCASÍN') || ['SHOSH', 'MANET'].includes(tBrand) || tSubcat === 'CHOCLO') && 
+                             (!tTitle.includes('TENIS') && !tTitle.includes('SPORT'));
+          
+          if (!isTenisBase || isExcluido) {
+            console.log(`[Scraper] Skipping non-tennis product: ${title} (Brand: ${hitBrand}, Subcategory: ${hitSubcat})`);
+            continue;
+          }
+          
           // Query the online store (Tienda Virtual) stock for this product
           console.log(`[Scraper] Querying Tienda Virtual stock for product: ${title} (${sku})`);
           const onlineStoreData = await getOnlineStoreSizes(browser, originalUrl, fallbackSizes);
