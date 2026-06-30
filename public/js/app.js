@@ -769,15 +769,30 @@ window.selectSize = function(pillEl, size) {
   pills.forEach(p => p.classList.remove('active'));
   pillEl.classList.add('active');
   
-  // Update stock indicator below size buttons
   const stockIndicator = document.getElementById('size-stock-indicator');
   if (stockIndicator && currentProduct) {
     const stockMap = currentProduct.sizes_stock || {};
-    let qty = 99; // Default fallback for local products without scraper metadata
+    const isPriceShoes = currentProduct.origin === 'priceshoes';
+    const buyBtn = document.getElementById('buy-btn');
     
-    // Attempt to match size keys (handling potential floats like "23.0" or "23")
+    // Caso 1: Producto de Price Shoes que no se ha sincronizado aún (mapa de stock vacío)
+    if (isPriceShoes && Object.keys(stockMap).length === 0) {
+      if (buyBtn) {
+        buyBtn.disabled = true;
+        buyBtn.innerHTML = '<i class="fa-solid fa-hourglass-half"></i> Actualizando Inventario';
+        buyBtn.style.backgroundColor = '#8e8e93'; // Gris
+        buyBtn.style.borderColor = '#8e8e93';
+      }
+      stockIndicator.style.color = '#ff9500'; // Naranja / Amarillo
+      stockIndicator.innerHTML = `<i class="fa-solid fa-circle-info"></i> Algunos tenis se fueron corriendo, estamos actualizando el inventario, intenta comprar más tarde.`;
+      return;
+    }
+    
+    // Caso 2: Producto local o producto sincronizado con datos reales
+    let qty = isPriceShoes ? 0 : 99; // Fallback seguro para Price Shoes (0) y local (99)
+    
     const sizeStr = size.toString().trim();
-    if (stockMap && typeof stockMap === 'object') {
+    if (stockMap && typeof stockMap === 'object' && Object.keys(stockMap).length > 0) {
       if (sizeStr in stockMap) {
         qty = parseInt(stockMap[sizeStr]) || 0;
       } else if (`${sizeStr}.0` in stockMap) {
@@ -793,12 +808,30 @@ window.selectSize = function(pillEl, size) {
       }
     }
     
-    if (qty >= 5) {
-      stockIndicator.style.color = '#34c759'; // Green
-      stockIndicator.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${qty} pares disponibles`;
+    // Habilitar/Deshabilitar según stock real obtenido
+    if (qty > 0) {
+      if (buyBtn) {
+        buyBtn.disabled = false;
+        buyBtn.innerHTML = '<i class="fa-solid fa-bag-shopping"></i> Añadir al Carrito';
+        buyBtn.style.backgroundColor = ''; // Restablecer estilo original
+        buyBtn.style.borderColor = '';
+      }
+      if (qty >= 5) {
+        stockIndicator.style.color = '#34c759'; // Verde
+        stockIndicator.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${qty} pares disponibles`;
+      } else {
+        stockIndicator.style.color = '#ff9500'; // Naranja
+        stockIndicator.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Pocas unidades (${qty} disponibles) <span style="font-weight: 600; color: #ff9500; display: block; margin-top: 4px; font-size: 13px;">⚠️ Stock bajo</span>`;
+      }
     } else {
-      stockIndicator.style.color = '#ff3b30'; // Red
-      stockIndicator.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${qty} pares disponibles <span style="font-weight: 600; color: #ff3b30; display: block; margin-top: 4px; font-size: 13px;">⚠️ Requiere verificación de stock</span>`;
+      if (buyBtn) {
+        buyBtn.disabled = true;
+        buyBtn.innerHTML = '<i class="fa-solid fa-ban"></i> Agotado';
+        buyBtn.style.backgroundColor = '#8e8e93'; // Gris
+        buyBtn.style.borderColor = '#8e8e93';
+      }
+      stockIndicator.style.color = '#ff3b30'; // Rojo
+      stockIndicator.innerHTML = `<i class="fa-solid fa-ban"></i> Sin existencias disponibles`;
     }
   }
 };
