@@ -59,18 +59,18 @@
     <div id="console-container" style="display: none;" class="admin-layout">
       
       <div class="admin-tabs">
-        <button class="admin-tab" onclick="switchTab('orders-section', this)">Pedidos</button>
+        <button class="admin-tab active" onclick="switchTab('orders-section', this)">Pedidos</button>
         <button class="admin-tab" id="tracking-tab-btn" onclick="switchTab('tracking-section', this)">Seguimiento</button>
         <button class="admin-tab" onclick="switchTab('reports-section', this)">📊 Reportes de Venta</button>
         <button class="admin-tab" onclick="switchTab('abandoned-section', this)">Carritos Abandonados</button>
         <button class="admin-tab" onclick="switchTab('coupons-section', this); loadAdminCoupons()">🎟️ Descuentos</button>
         <button class="admin-tab" onclick="switchTab('scraper-section', this)">Sincronizar Stock</button>
         <button class="admin-tab" id="comparador-tab-btn" onclick="switchTab('comparador-section', this); loadComparadorSection()">💰 Comparador</button>
-        <button class="admin-tab active" onclick="switchTab('dashboard-section', this)">Dashboard</button>
+        <button class="admin-tab" onclick="switchTab('dashboard-section', this)">Dashboard</button>
       </div>
 
       <!-- SECTION: DASHBOARD (Analytics) -->
-      <section id="dashboard-section" class="admin-section active">
+      <section id="dashboard-section" class="admin-section">
         <!-- Analytics Cards -->
         <div class="analytics-grid">
           <div class="analytics-card">
@@ -116,7 +116,7 @@
       </section>
 
       <!-- SECTION: ORDERS LIST -->
-      <section id="orders-section" class="admin-section">
+      <section id="orders-section" class="admin-section active">
         <h3 style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">Gestión de Pedidos</h3>
         <div class="table-container">
           <table>
