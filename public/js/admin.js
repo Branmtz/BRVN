@@ -17,14 +17,30 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Rotating Announcement Banner
-function initAnnouncementBanner() {
-  const announcements = [
+async function initAnnouncementBanner() {
+  const textEl = document.getElementById('announcement-text');
+  if (!textEl) return;
+  
+  let announcements = [
     "🎁 ¡DESCUENTO EN TU PRIMERA COMPRA! Código: MIPRIMERCOMPRA 🎁",
     "🚚 Envío Gratis en pedidos mayores a $1,499 MXN",
     "💳 Compra a MSI con Mercado Pago"
   ];
-  const textEl = document.getElementById('announcement-text');
-  if (!textEl) return;
+  
+  try {
+    const res = await fetch('/api/announcements');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.length > 0) {
+        announcements = data.map(a => a.text);
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching announcements:', err);
+  }
+  
+  if (announcements.length === 0) return;
+  textEl.textContent = announcements[0];
   
   let index = 0;
   setInterval(() => {
@@ -1054,6 +1070,7 @@ window.loadAdminCoupons = async function() {
   const listEl = document.getElementById('admin-coupons-list');
   if (!listEl) return;
   listEl.innerHTML = '<p style="color:#aaa;">Cargando...</p>';
+  loadAdminAnnouncements();
   try {
     const token = localStorage.getItem('paps_token');
     const res = await fetch('/api/admin/coupons', {
@@ -1388,3 +1405,82 @@ async function loadCmpHistory() {
   } catch (err) { console.error('Error cargando historial:', err); }
 }
 
+/* ── Admin: Navbar Announcements ───────────────────────── */
+
+window.loadAdminAnnouncements = async function() {
+  const listEl = document.getElementById('admin-announcements-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p style="color:#aaa;">Cargando anuncios...</p>';
+  try {
+    const res = await fetch('/api/announcements');
+    if (!res.ok) throw new Error('Failed to fetch announcements');
+    const data = await res.json();
+    if (!data || data.length === 0) {
+      listEl.innerHTML = '<p style="color:#aaa; font-style: italic; font-size: 13px;">No hay anuncios activos.</p>';
+      return;
+    }
+    listEl.innerHTML = data.map(a => `
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #fff; border: 1px solid #e5e5e5; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); max-width: 500px;">
+        <span style="font-size: 13.5px; color: var(--text-primary); font-weight: 500;">${a.text}</span>
+        <button onclick="deleteAdminAnnouncement(${a.id})"
+          style="background: #fff0f0; border: 1px solid #ffa39e; color: #ff4d4f; border-radius: 99px; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; cursor: pointer; transition: all 0.2s;"
+          title="Eliminar Anuncio">
+          &minus;
+        </button>
+      </div>
+    `).join('');
+  } catch (err) {
+    listEl.innerHTML = `<p style="color:#ff3b30; font-size: 13px;">Error al cargar anuncios: ${err.message}</p>`;
+  }
+};
+
+window.createAdminAnnouncement = async function() {
+  const inputEl = document.getElementById('new-announcement-text');
+  if (!inputEl) return;
+  const text = inputEl.value.trim();
+  if (!text) {
+    alert('Por favor, escribe el texto del anuncio.');
+    return;
+  }
+  const token = localStorage.getItem('paps_token');
+  try {
+    const res = await fetch('/api/admin/announcements', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ text })
+    });
+    if (res.ok) {
+      inputEl.value = '';
+      await loadAdminAnnouncements();
+    } else {
+      const data = await res.json();
+      alert(data.error || 'Error al agregar anuncio.');
+    }
+  } catch (err) {
+    alert('Error al conectar con el servidor: ' + err.message);
+  }
+};
+
+window.deleteAdminAnnouncement = async function(id) {
+  if (!confirm('¿Estás seguro de que deseas eliminar este anuncio?')) return;
+  const token = localStorage.getItem('paps_token');
+  try {
+    const res = await fetch(`/api/admin/announcements/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (res.ok) {
+      await loadAdminAnnouncements();
+    } else {
+      const data = await res.json();
+      alert(data.error || 'Error al eliminar anuncio.');
+    }
+  } catch (err) {
+    alert('Error al conectar con el servidor: ' + err.message);
+  }
+};

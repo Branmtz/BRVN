@@ -7,14 +7,30 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Rotating Announcement Banner
-function initAnnouncementBanner() {
-  const announcements = [
-        "🎁 ¡DESCUENTO EN TU PRIMERA COMPRA! Código: MIPRIMERCOMPRA 🎁",
+async function initAnnouncementBanner() {
+  const textEl = document.getElementById('announcement-text');
+  if (!textEl) return;
+  
+  let announcements = [
+    "🎁 ¡DESCUENTO EN TU PRIMERA COMPRA! Código: MIPRIMERCOMPRA 🎁",
     "🚚 Envío Gratis en pedidos mayores a $1,499 MXN",
     "💳 Compra a MSI con Mercado Pago"
   ];
-  const textEl = document.getElementById('announcement-text');
-  if (!textEl) return;
+  
+  try {
+    const res = await fetch('/api/announcements');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.length > 0) {
+        announcements = data.map(a => a.text);
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching announcements:', err);
+  }
+  
+  if (announcements.length === 0) return;
+  textEl.textContent = announcements[0];
   
   let index = 0;
   setInterval(() => {

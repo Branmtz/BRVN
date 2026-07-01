@@ -558,6 +558,34 @@ async function initializeDatabase() {
       console.log('Admin user already exists.');
     }
 
+    // 8. Create Announcements Table
+    await dbQuery.run(`
+      CREATE TABLE IF NOT EXISTS announcements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Announcements table verified/created.');
+
+    // Seed default announcements if table is empty
+    try {
+      const countRes = await dbQuery.get("SELECT COUNT(*) as count FROM announcements");
+      if (countRes && countRes.count === 0) {
+        const defaults = [
+          "🎁 ¡Regalo en tu Primera Compra, ¡Regístrate ahora! 🎁",
+          "💳 Compra a MSI con Mercado Pago",
+          "🚚 Envío Gratis en pedidos mayores a $1,499 MXN"
+        ];
+        for (const text of defaults) {
+          await dbQuery.run("INSERT INTO announcements (text) VALUES (?)", [text]);
+        }
+        console.log("Default announcements table seeded.");
+      }
+    } catch (err) {
+      console.error("Error seeding announcements:", err.message);
+    }
+
   } catch (error) {
     console.error('Error initializing database tables:', error);
   }

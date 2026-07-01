@@ -289,42 +289,71 @@
       <section id="coupons-section" class="admin-section">
         <h3 style="font-size: 20px; font-weight: 600; margin-bottom: 20px;">🎟️ Gestión de Descuentos</h3>
 
-        <!-- Crear cupón -->
-        <div style="background: #f9f9f9; border: 1px solid #e5e5e5; border-radius: 10px; padding: 20px; margin-bottom: 28px; max-width: 540px;">
-          <h4 style="font-size: 14px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 16px;">Crear Nuevo Cupón</h4>
-          <div style="display: flex; flex-direction: column; gap: 12px;">
-            <div>
-              <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Nombre del Cupón (código)</label>
-              <input type="text" id="new-coupon-code" placeholder="Ej. VERANO20" style="width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; text-transform: uppercase; box-sizing: border-box;">
-            </div>
-            <div>
-              <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Descripción (opcional)</label>
-              <input type="text" id="new-coupon-desc" placeholder="Ej. 20% de descuento en verano" style="width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; box-sizing: border-box;">
-            </div>
-            <div style="display: flex; gap: 10px; align-items: flex-end;">
-              <div style="flex: 1;">
-                <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Tipo de Descuento</label>
-                <select id="new-coupon-type" style="width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; box-sizing: border-box;">
-                  <option value="percent">Porcentaje (%)</option>
-                  <option value="amount">Monto fijo ($)</option>
-                </select>
+        <div style="display: flex; gap: 28px; flex-wrap: wrap;">
+          <!-- Columna 1: Cupones -->
+          <div style="flex: 1; min-width: 300px; max-width: 540px;">
+            <div style="background: #f9f9f9; border: 1px solid #e5e5e5; border-radius: 10px; padding: 20px; margin-bottom: 28px;">
+              <h4 style="font-size: 14px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 16px;">Crear Nuevo Cupón</h4>
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div>
+                  <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Nombre del Cupón (código)</label>
+                  <input type="text" id="new-coupon-code" placeholder="Ej. VERANO20" style="width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; text-transform: uppercase; box-sizing: border-box;">
+                </div>
+                <div>
+                  <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Descripción (opcional)</label>
+                  <input type="text" id="new-coupon-desc" placeholder="Ej. 20% de descuento en verano" style="width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; box-sizing: border-box;">
+                </div>
+                <div style="display: flex; gap: 10px; align-items: flex-end;">
+                  <div style="flex: 1;">
+                    <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Tipo de Descuento</label>
+                    <select id="new-coupon-type" style="width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; box-sizing: border-box;">
+                      <option value="percent">Porcentaje (%)</option>
+                      <option value="amount">Monto fijo ($)</option>
+                    </select>
+                  </div>
+                  <div style="flex: 1;">
+                    <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Valor</label>
+                    <input type="number" id="new-coupon-value" min="0" placeholder="Ej. 20" style="width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; box-sizing: border-box;">
+                  </div>
+                </div>
+                <div id="coupon-create-msg" style="font-size: 12px; font-weight: 600; display: none;"></div>
+                <button onclick="createAdminCoupon()" class="buy-button" style="width: auto; padding: 10px 24px; font-size: 14px; align-self: flex-start;">
+                  <i class="fa-solid fa-plus"></i> Crear Cupón
+                </button>
               </div>
-              <div style="flex: 1;">
-                <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Valor</label>
-                <input type="number" id="new-coupon-value" min="0" placeholder="Ej. 20" style="width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; box-sizing: border-box;">
-              </div>
             </div>
-            <div id="coupon-create-msg" style="font-size: 12px; font-weight: 600; display: none;"></div>
-            <button onclick="createAdminCoupon()" class="buy-button" style="width: auto; padding: 10px 24px; font-size: 14px; align-self: flex-start;">
-              <i class="fa-solid fa-plus"></i> Crear Cupón
-            </button>
-          </div>
-        </div>
 
-        <!-- Lista de cupones globales -->
-        <h4 style="font-size: 14px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 12px;">Cupones Globales Activos</h4>
-        <div id="admin-coupons-list" style="font-size: 14px; color: var(--text-secondary);">
-          <p>Cargando...</p>
+            <!-- Lista de cupones globales -->
+            <h4 style="font-size: 14px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 12px;">Cupones Globales Activos</h4>
+            <div id="admin-coupons-list" style="font-size: 14px; color: var(--text-secondary);">
+              <p>Cargando...</p>
+            </div>
+          </div>
+
+          <!-- Columna 2: Anuncios -->
+          <div style="flex: 1; min-width: 300px; max-width: 540px;">
+            <div style="background: #f9f9f9; border: 1px solid #e5e5e5; border-radius: 10px; padding: 20px; margin-bottom: 28px;">
+              <h4 style="font-size: 14px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 16px;">📢 Anuncios del Navbar</h4>
+              
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div>
+                  <label style="font-size: 12px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Texto del Anuncio</label>
+                  <div style="display: flex; gap: 8px;">
+                    <input type="text" id="new-announcement-text" placeholder="Ej. ¡Envío gratis a todo el país!" style="flex: 1; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; box-sizing: border-box;">
+                    <button onclick="createAdminAnnouncement()" class="buy-button" style="width: auto; padding: 9px 16px; font-size: 14px; margin: 0; background-color: #34c759; border-color: #34c759; display: flex; align-items: center; gap: 6px;">
+                      <i class="fa-solid fa-plus"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Lista de anuncios activos -->
+            <h4 style="font-size: 14px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; margin-bottom: 12px;">Anuncios Activos</h4>
+            <div id="admin-announcements-list" style="display: flex; flex-direction: column; gap: 10px;">
+              <p style="font-size: 13.5px; color: var(--text-secondary);">Cargando anuncios...</p>
+            </div>
+          </div>
         </div>
       </section>
 

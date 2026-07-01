@@ -2535,6 +2535,47 @@ app.delete('/api/admin/coupons/:id', authenticateAdmin, async (req, res) => {
   }
 });
 
+// GET Public announcements list
+app.get('/api/announcements', async (req, res) => {
+  try {
+    const announcements = await dbQuery.all("SELECT * FROM announcements ORDER BY created_at ASC");
+    res.json(announcements);
+  } catch (err) {
+    console.error('Error fetching public announcements:', err);
+    res.status(500).json({ error: 'Error al obtener los anuncios.' });
+  }
+});
+
+// POST Create nav announcement (Admin only)
+app.post('/api/admin/announcements', authenticateAdmin, async (req, res) => {
+  const { text } = req.body;
+  if (!text || text.trim().length === 0) {
+    return res.status(400).json({ error: 'El texto del anuncio es requerido.' });
+  }
+  try {
+    await dbQuery.run("INSERT INTO announcements (text) VALUES (?)", [text.trim()]);
+    res.json({ success: true, message: 'Anuncio agregado exitosamente.' });
+  } catch (err) {
+    console.error('Error creating admin announcement:', err);
+    res.status(500).json({ error: 'Error al crear el anuncio.' });
+  }
+});
+
+// DELETE Admin announcement (Admin only)
+app.delete('/api/admin/announcements/:id', authenticateAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await dbQuery.run("DELETE FROM announcements WHERE id = ?", [id]);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'El anuncio no existe.' });
+    }
+    res.json({ success: true, message: 'Anuncio eliminado exitosamente.' });
+  } catch (err) {
+    console.error('Error deleting admin announcement:', err);
+    res.status(500).json({ error: 'Error al eliminar el anuncio.' });
+  }
+});
+
 // GET Debug SMTP Connection and Email Sending
 app.get('/api/debug/test-email', async (req, res) => {
   const host = process.env.SMTP_HOST;
