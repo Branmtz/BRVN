@@ -1,4 +1,4 @@
-﻿let hoursChartInstance = null;
+let hoursChartInstance = null;
 let genderChartInstance = null;
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -587,28 +587,26 @@ async function handleScraperSubmit(e) {
   e.preventDefault();
   
   const token = localStorage.getItem('paps_token');
-  const searchUrl = document.getElementById('scraper-url').value.trim();
-  const limit = document.getElementById('scraper-products').value;
-  const category = document.getElementById('scraper-category').value.trim() || 'General';
+  const catalogsList = document.getElementById('scraper-catalogs-list').value.trim();
+  const filterKeyword = document.getElementById('scraper-filter-keyword').value.trim() || 'Tenis';
   
   const statusBox = document.getElementById('scraper-status-box');
   statusBox.style.display = 'block';
   
   try {
-    const res = await fetch('/api/admin/scrape', {
+    const res = await fetch('/api/admin/scrape-bulk', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ searchUrl, limit, category })
+      body: JSON.stringify({ catalogsList, filterKeyword })
     });
     
     if (res.ok) {
-      alert('Sincronización iniciada en segundo plano con éxito.');
-      document.getElementById('scraper-url').value = '';
+      alert('Sincronización masiva de catálogos iniciada en segundo plano con éxito.');
+      document.getElementById('scraper-catalogs-list').value = '';
       loadCatalogSources();
-      loadCategories();
       // Hide status box after a short delay
       setTimeout(() => {
         statusBox.style.display = 'none';

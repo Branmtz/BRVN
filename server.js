@@ -12,6 +12,7 @@ const {
   calculateBRVNPrice
 } = require('./price-comparator');
 require('dotenv').config();
+const { spawn } = require('child_process');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -2291,6 +2292,106 @@ app.post('/api/admin/scrape', authenticateAdmin, async (req, res) => {
     });
     
   res.json({ success: true, message: 'La sincronización ha comenzado en segundo plano.' });
+});
+
+let isSyncRunning = false;
+
+function determineCategoryAndUrl(line) {
+  const cleanLine = line.trim();
+  if (!cleanLine) return null;
+
+  let url;
+  if (cleanLine.startsWith('http://') || cleanLine.startsWith('https://')) {
+    url = cleanLine;
+  } else {
+    url = `https://www.priceshoes.com/buscar?division=CALZADO&page=1&catalogs=${encodeURIComponent(cleanLine)}`;
+  }
+
+  const lower = cleanLine.toLowerCase();
+  let category = 'General';
+
+  if (lower.includes('confort') || lower.includes('comodidad')) {
+    category = 'Confort';
+  } else if (lower.includes('urbano') || lower.includes('trendy')) {
+    category = 'URBANO';
+  } else if (lower.includes('adventure')) {
+    category = 'Adventure';
+  } else if (lower.includes('prokennex')) {
+    category = 'Prokennex';
+  } else if (lower.includes('kids') || lower.includes('infantil') || lower.includes('escolar') || lower.includes('magic steps')) {
+    category = 'Niños';
+  } else if (lower.includes('caballero') || lower.includes('man')) {
+    category = 'Hombre';
+  } else if (lower.includes('dama') || lower.includes('mujer') || lower.includes('fiesta') || lower.includes('piedras')) {
+    category = 'Mujer';
+  } else if (lower.includes('futbol') || lower.includes('fútbol')) {
+    category = 'Importados Futbol 2026';
+  } else {
+    const firstWord = cleanLine.split('|')[0].trim();
+    if (firstWord.length > 0) {
+      category = firstWord.charAt(0).toUpperCase() + firstWord.slice(1);
+    }
+  }
+
+  return { url, category };
+}
+
+app.post('/api/admin/scrape-bulk', authenticateAdmin, async (req, res) => {
+  const { catalogsList, filterKeyword } = req.body;
+  if (!catalogsList) return res.status(400).json({ error: 'La lista de catálogos es requerida.' });
+  
+  if (isSyncRunning) {
+    return res.status(409).json({ error: 'Una sincronización masiva de catálogos ya está en curso.' });
+  }
+
+  const keyword = (filterKeyword || 'Tenis').trim();
+  const lines = catalogsList.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  
+  if (lines.length === 0) {
+    return res.status(400).json({ error: 'La lista de catálogos no contiene ninguna línea válida.' });
+  }
+
+  console.log(`[Admin Scraper Bulk] Starting bulk register. Keyword: ${keyword}, Catalog Count: ${lines.length}`);
+
+  try {
+    // 1. Clear old catalog sources
+    await dbQuery.run("DELETE FROM catalog_sources");
+    console.log("[Admin Scraper Bulk] Cleared old catalog sources.");
+
+    // 2. Insert new catalog sources
+    for (const line of lines) {
+      const parsed = determineCategoryAndUrl(line);
+      if (parsed) {
+        await dbQuery.run(`
+          INSERT INTO catalog_sources (url, products_limit, category, filter_keyword) 
+          VALUES (?, ?, ?, ?)
+        `, [parsed.url, 10000, parsed.category, keyword]);
+        console.log(`[Admin Scraper Bulk] Registered source: ${parsed.category} -> ${parsed.url} (keyword: ${keyword})`);
+      }
+    }
+    
+    // 3. Trigger run-sync.js in the background
+    isSyncRunning = true;
+    console.log("[Admin Scraper Bulk] Spawning background CLI sync execution (run-sync.js)...");
+    
+    const child = spawn('node', ['run-sync.js'], {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: 'ignore'
+    });
+    
+    child.unref();
+
+    child.on('close', (code) => {
+      console.log(`[Admin Scraper Bulk] Background sync finished with code ${code}.`);
+      isSyncRunning = false;
+    });
+
+    res.json({ success: true, message: 'La sincronización masiva ha comenzado en segundo plano con éxito.' });
+  } catch (err) {
+    console.error("[Admin Scraper Bulk] Database insertion or process spawn failed:", err);
+    res.status(500).json({ error: 'Error al registrar catálogos e iniciar la sincronización.' });
+  }
 });
 
 // GET All Catalog Sources

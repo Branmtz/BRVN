@@ -197,37 +197,31 @@
 
       <!-- SECTION: SCRAPER MANAGER -->
       <section id="scraper-section" class="admin-section" style="max-width: 800px;">
-        <h3 style="font-size: 20px; font-weight: 600; margin-bottom: 12px;">Sincronizador de Catálogo (Price Shoes)</h3>
+        <h3 style="font-size: 20px; font-weight: 600; margin-bottom: 12px;">Sincronizador de Catálogos (Price Shoes)</h3>
         <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; line-height: 1.5;">
-          Ingresa la URL de búsqueda/catálogo de Price Shoes para descargar calzados y actualizar tallas o inventarios disponibles.
+          Escribe o pega los nombres oficiales de los catálogos (uno por línea, ej: <i>Confort | 2026 | 1e</i>). El sistema registrará los catálogos y activará la descarga masiva de productos (sin consultar existencias reales para ir a máxima velocidad).
         </p>
         
         <form id="scraper-form" style="display: flex; flex-direction: column; gap: 16px; max-width: 600px;">
           <div class="form-group">
-            <label for="scraper-url">URL de búsqueda Price Shoes</label>
-            <input type="url" id="scraper-url" required placeholder="https://www.priceshoes.com/buscar?division=CALZADO&subcategory=BOTA...">
+            <label for="scraper-catalogs-list">Lista de Catálogos (Uno por línea)</label>
+            <textarea id="scraper-catalogs-list" rows="10" required placeholder="Caballeros | 26-27 | 1e&#10;Calzado para servicios | aco | 2026 | 1e&#10;Comodidad en piel | aco | 2026 | 1e..." style="width: 100%; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; font-family: monospace; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); resize: vertical;"></textarea>
           </div>
           
-          <div class="form-group" style="width: 180px;">
-            <label for="scraper-products">Número de Productos</label>
-            <input type="number" id="scraper-products" min="1" value="30">
-          </div>
-          
-          <div class="form-group">
-            <label for="scraper-category">Categoría de Catálogo</label>
-            <input type="text" id="scraper-category" list="existing-categories" placeholder="Ej. Botas, Tenis, Sandalias" value="General">
-            <datalist id="existing-categories"></datalist>
+          <div class="form-group" style="width: 250px;">
+            <label for="scraper-filter-keyword">Producto a guardar (Filtro por palabra clave)</label>
+            <input type="text" id="scraper-filter-keyword" value="Tenis" required placeholder="Ej. Tenis, Perfumes, Pantalones">
           </div>
           
           <button type="submit" class="buy-button" style="margin-top: 8px;">
-            <i class="fa-solid fa-arrows-rotate"></i> Iniciar Descarga de Catálogo
+            <i class="fa-solid fa-arrows-rotate"></i> Iniciar Descarga de Catálogos
           </button>
         </form>
 
         <div id="scraper-status-box" class="tracking-info-box" style="display: none; margin-top: 24px; border-color: #ff9500; max-width: 600px;">
           <h4 style="font-weight: 600; color: #ff9500;"><i class="fa-solid fa-spinner fa-spin"></i> Sincronización en curso</h4>
           <p style="font-size: 13px; margin-top: 6px; color: var(--text-secondary); line-height: 1.4;">
-            El scraper se está ejecutando en segundo plano en el servidor. Este proceso puede tardar unos minutos dependiendo de la cantidad de productos seleccionados. Puedes seguir usando el panel de administrador normalmente.
+            El scraper masivo de catálogos se está ejecutando en segundo plano en el servidor. Esto cargará los productos y las tallas generales. Puedes seguir usando el panel de administrador normalmente.
           </p>
         </div>
 

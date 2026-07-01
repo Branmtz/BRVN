@@ -206,13 +206,13 @@ async function getOnlineStoreSizes(browser, originalUrl, fallbackSizes) {
  */
 let isScrapingActive = false;
 
-async function runScraper(searchUrl, productLimit = 30, category = 'General') {
+async function runScraper(searchUrl, productLimit = 30, category = 'General', filterKeyword = 'Tenis') {
   if (isScrapingActive) {
     console.log('[Scraper] A scraping task is already active. Skipping execution.');
     return 0;
   }
   isScrapingActive = true;
-  console.log(`Starting scraper. Target product limit: ${productLimit}, Category: ${category}`);
+  console.log(`Starting scraper. Target product limit: ${productLimit}, Category: ${category}, Keyword: ${filterKeyword}`);
   
   let browser;
   let totalSaved = 0;
@@ -318,21 +318,49 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General') {
             ? `https://www.priceshoes.com/productos/${source.url_key}`
             : `https://www.priceshoes.com/productos/${sku}`;
           
-          // Check if the product is a tennis product before querying stock
-          const hitBrand = source.brand || '';
-          const hitSubcat = source.subcategory || '';
-          const tTitle = title.toUpperCase();
-          const tBrand = hitBrand.toUpperCase();
-          const tSubcat = hitSubcat.toUpperCase();
-          const isTenisBase = tTitle.includes('TENIS') || 
-                              tTitle.includes('SPORT') || 
-                              ['CORRER', 'SKATE', 'FUTBOL', 'FÚTBOL', 'ENTRENAMIENTO', 'BASKETBALL', 'PADEL', 'PÁDEL', 'CAMINAR'].includes(tSubcat);
-          const isExcluido = (tTitle.includes('MOCASIN') || tTitle.includes('MOCASÍN') || ['SHOSH', 'MANET'].includes(tBrand) || tSubcat === 'CHOCLO') && 
-                             (!tTitle.includes('TENIS') && !tTitle.includes('SPORT'));
+          // Filter product based on the filterKeyword
+          const kw = (filterKeyword || 'Tenis').trim().toUpperCase();
+          const isTenisFilter = kw === 'TENIS';
           
-          if (!isTenisBase || isExcluido) {
-            console.log(`[Scraper] Skipping non-tennis product: ${title} (Brand: ${hitBrand}, Subcategory: ${hitSubcat})`);
-            continue;
+          if (isTenisFilter) {
+            const hitBrand = source.brand || '';
+            const hitSubcat = source.subcategory || '';
+            const tTitle = title.toUpperCase();
+            const tBrand = hitBrand.toUpperCase();
+            const tSubcat = hitSubcat.toUpperCase();
+            const isTenisBase = tTitle.includes('TENIS') || 
+                                tTitle.includes('SPORT') || 
+                                ['CORRER', 'SKATE', 'FUTBOL', 'FÚTBOL', 'ENTRENAMIENTO', 'BASKETBALL', 'PADEL', 'PÁDEL', 'CAMINAR'].includes(tSubcat);
+            const isExcluido = (tTitle.includes('MOCASIN') || tTitle.includes('MOCASÍN') || ['SHOSH', 'MANET'].includes(tBrand) || tSubcat === 'CHOCLO') && 
+                               (!tTitle.includes('TENIS') && !tTitle.includes('SPORT'));
+            
+            if (!isTenisBase || isExcluido) {
+              console.log(`[Scraper] Skipping non-tennis product: ${title} (Brand: ${hitBrand}, Subcategory: ${hitSubcat})`);
+              continue;
+            }
+          } else {
+            // Generic dynamic keyword match
+            const titleUpper = title.toUpperCase();
+            const subcatUpper = (source.subcategory || '').toUpperCase();
+            const brandUpper = (source.brand || '').toUpperCase();
+            const descUpper = description.toUpperCase();
+            const deptUpper = (source.department || '').toUpperCase();
+            
+            // Singular/plural stemming
+            let stemUpper = kw;
+            if (kw.endsWith('ES')) {
+              stemUpper = kw.slice(0, -2);
+            } else if (kw.endsWith('S') && !kw.endsWith('IS')) {
+              stemUpper = kw.slice(0, -1);
+            }
+            
+            const matched = titleUpper.includes(kw) || subcatUpper.includes(kw) || brandUpper.includes(kw) || descUpper.includes(kw) || deptUpper.includes(kw) ||
+                            (stemUpper.length > 2 && (titleUpper.includes(stemUpper) || subcatUpper.includes(stemUpper) || brandUpper.includes(stemUpper) || descUpper.includes(stemUpper) || deptUpper.includes(stemUpper)));
+            
+            if (!matched) {
+              console.log(`[Scraper] Skipping product not matching keyword '${kw}': ${title} (Subcategory: ${source.subcategory})`);
+              continue;
+            }
           }
           
           // Skip online store stock verification based on user request.

@@ -365,6 +365,7 @@ async function initializeDatabase() {
         url TEXT UNIQUE NOT NULL,
         products_limit INTEGER DEFAULT 30,
         category TEXT DEFAULT 'General',
+        filter_keyword TEXT DEFAULT 'Tenis',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
@@ -374,6 +375,14 @@ async function initializeDatabase() {
     try {
       await dbQuery.run("ALTER TABLE catalog_sources ADD COLUMN category TEXT DEFAULT 'General'");
       console.log('Migrated: category column added to catalog_sources.');
+    } catch (e) {
+      // column likely already exists
+    }
+
+    // Migration for catalog_sources table: add filter_keyword if not present
+    try {
+      await dbQuery.run("ALTER TABLE catalog_sources ADD COLUMN filter_keyword TEXT DEFAULT 'Tenis'");
+      console.log('Migrated: filter_keyword column added to catalog_sources.');
     } catch (e) {
       // column likely already exists
     }

@@ -9,7 +9,7 @@ async function runSync() {
     for (const source of sources) {
       console.log(`Syncing source: ${source.url} (limit: ${source.products_limit}, category: ${source.category})`);
       try {
-        const savedCount = await runScraper(source.url, source.products_limit, source.category || 'General');
+        const savedCount = await runScraper(source.url, source.products_limit, source.category || 'General', source.filter_keyword || 'Tenis');
         console.log(`Successfully synced ${savedCount} products for source ID ${source.id}`);
       } catch (scrapeErr) {
         console.error(`Scraper error for source ID ${source.id}:`, scrapeErr.message);
