@@ -58,9 +58,7 @@
     <!-- 2. ADMIN CONSOLE CONTAINER (Hidden by default) -->
     <div id="console-container" style="display: none;" class="admin-layout">
       
-      <!-- Tabs header -->
       <div class="admin-tabs">
-        <button class="admin-tab active" onclick="switchTab('dashboard-section', this)">Dashboard</button>
         <button class="admin-tab" onclick="switchTab('orders-section', this)">Pedidos</button>
         <button class="admin-tab" id="tracking-tab-btn" onclick="switchTab('tracking-section', this)">Seguimiento</button>
         <button class="admin-tab" onclick="switchTab('reports-section', this)">📊 Reportes de Venta</button>
@@ -68,6 +66,7 @@
         <button class="admin-tab" onclick="switchTab('coupons-section', this); loadAdminCoupons()">🎟️ Descuentos</button>
         <button class="admin-tab" onclick="switchTab('scraper-section', this)">Sincronizar Stock</button>
         <button class="admin-tab" id="comparador-tab-btn" onclick="switchTab('comparador-section', this); loadComparadorSection()">💰 Comparador</button>
+        <button class="admin-tab active" onclick="switchTab('dashboard-section', this)">Dashboard</button>
       </div>
 
       <!-- SECTION: DASHBOARD (Analytics) -->
