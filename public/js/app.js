@@ -821,7 +821,7 @@ window.selectSize = function(pillEl, size) {
         stockIndicator.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${qty} pares disponibles`;
       } else {
         stockIndicator.style.color = '#ff9500'; // Naranja
-        stockIndicator.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Pocas unidades (${qty} disponibles) <span style="font-weight: 600; color: #ff9500; display: block; margin-top: 4px; font-size: 13px;">⚠️ Stock bajo</span>`;
+        stockIndicator.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Pocas unidades (${qty} disponibles) <span style="font-weight: 600; color: #ff9500; display: block; margin-top: 4px; font-size: 13px;">⚠️ Es posible que este par salga corriendo</span>`;
       }
     } else {
       if (buyBtn) {
