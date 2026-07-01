@@ -99,7 +99,10 @@ async function getOnlineStoreSizes(browser, originalUrl, fallbackSizes) {
         const inventories = json.store_inventories || [];
         const onlineInfo = inventories.find(store => {
           const name = (store.store_name || '').toLowerCase().trim();
-          return name === 'tienda virtual' || name === 'ecommerce';
+          return name === 'tienda virtual' || 
+                 name === 'ecommerce' || 
+                 name === 'virtual' || 
+                 name === 'online';
         });
         
         if (onlineInfo) {
@@ -536,7 +539,10 @@ async function verifyLiveStock(originalUrl, size) {
             const inventories = json.store_inventories || [];
             const onlineInfo = inventories.find(store => {
               const name = (store.store_name || '').toLowerCase().trim();
-              return name === 'tienda virtual' || name === 'ecommerce';
+              return name === 'tienda virtual' || 
+                     name === 'ecommerce' || 
+                     name === 'virtual' || 
+                     name === 'online';
             });
             if (onlineInfo) {
               targetStoreStock = parseInt(onlineInfo.quantity) || 0;
