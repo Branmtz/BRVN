@@ -772,7 +772,6 @@ function updateProductImageFromIndex() {
   cards.forEach((c, idx) => {
     if (idx === currentImageIdx) {
       c.classList.add('active');
-      c.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     } else {
       c.classList.remove('active');
     }
