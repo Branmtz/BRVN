@@ -110,6 +110,13 @@ async function initializeDatabase() {
     `);
     console.log('Products table verified/created.');
 
+    // Create Indexes for Products Table to optimize queries and searches
+    await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_status_bestseller_id ON products(status, is_bestseller DESC, id DESC)");
+    await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)");
+    await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_gender ON products(gender)");
+    await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand)");
+    console.log('Products table indexes verified/created.');
+
     // Migration for products table: add category if not present
     try {
       await dbQuery.run("ALTER TABLE products ADD COLUMN category TEXT DEFAULT 'General'");

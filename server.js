@@ -403,8 +403,9 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
     }
 
     if (req.query.search) {
-      const s = `%${req.query.search.toLowerCase()}%`;
-      whereClauses.push(`(LOWER(title) LIKE '${s}' OR LOWER(brand) LIKE '${s}' OR LOWER(sku) LIKE '${s}' OR LOWER(description) LIKE '${s}')`);
+      const s = `%${req.query.search.trim().toLowerCase()}%`;
+      whereClauses.push("(title LIKE ? OR brand LIKE ? OR sku LIKE ? OR description LIKE ?)");
+      params.push(s, s, s, s);
     }
 
     if (req.query.brand && req.query.brand !== 'all') {
