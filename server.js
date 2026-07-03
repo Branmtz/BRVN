@@ -23,6 +23,25 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.get('/api/admin/test-fetch', async (req, res) => {
+  const url = "https://www.priceshoes.com/productos/tenis-casual-basico-confort872451";
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      }
+    });
+    const html = await response.text();
+    res.json({
+      status: response.status,
+      headers: Object.fromEntries(response.headers.entries()),
+      htmlPreview: html.substring(0, 1000)
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Logistics / Shipping Router
 app.use(require('./shipping'));
 
