@@ -759,6 +759,9 @@ app.get('/api/products/:id/sync', optionalAuthenticateCustomer, async (req, res)
       try {
         const liveData = await syncSingleProductLive(product);
         if (liveData) {
+          if (liveData.success === false) {
+            return res.json(liveData);
+          }
           const sortedSizes = liveData.sizes.sort((a, b) => {
             const numA = parseFloat(a);
             const numB = parseFloat(b);

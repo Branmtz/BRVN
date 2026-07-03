@@ -705,7 +705,11 @@ async function syncSingleProductLive(product) {
     };
   } catch (err) {
     console.error(`[On-Demand Sync] Failed live sync for product ID ${product.id}:`, err.message);
-    return null;
+    return {
+      success: false,
+      error: err.message,
+      stack: err.stack
+    };
   } finally {
     // Persistent browser is kept open for subsequent requests.
   }
