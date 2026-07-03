@@ -7,13 +7,41 @@ const dbPath = path.resolve(__dirname, 'paps_store.db');
 const dbUrl = process.env.DATABASE_URL || `file:${dbPath}`;
 const authToken = process.env.DATABASE_AUTH_TOKEN || '';
 
+// Local replica file used when connecting to a remote Turso database.
+// Reads are served from this local SQLite file (near-zero latency) while
+// writes go to the remote and get pulled back down on each sync interval.
+const localReplicaPath = path.resolve(__dirname, 'local-replica.db');
+const isRemote = !dbUrl.startsWith('file:');
+
 console.log('Initializing database client...');
 console.log('Database URL:', dbUrl.startsWith('file:') ? dbUrl : dbUrl.split('@')[dbUrl.split('@').length - 1]);
+console.log(isRemote ? 'Using embedded replica (local reads, synced writes).' : 'Using local file database.');
 
-const client = createClient({
-  url: dbUrl,
-  authToken: authToken
-});
+const client = isRemote
+  ? createClient({
+      url: `file:${localReplicaPath}`,
+      syncUrl: dbUrl,
+      authToken: authToken,
+      syncInterval: 60 // seconds between automatic background syncs
+    })
+  : createClient({
+      url: dbUrl,
+      authToken: authToken
+    });
+
+// For remote setups, do an initial blocking sync on boot so the very first
+// requests aren't served from a stale/empty local replica.
+async function ensureInitialSync() {
+  if (isRemote && typeof client.sync === 'function') {
+    try {
+      console.log('Performing initial Turso replica sync...');
+      await client.sync();
+      console.log('Initial Turso replica sync complete.');
+    } catch (err) {
+      console.error('Initial replica sync failed:', err.message);
+    }
+  }
+}
 
 // Polyfill dbQuery to match sqlite3 helper behavior
 const dbQuery = {
@@ -72,8 +100,39 @@ const db = {
 // Initialize connection and tables
 initializeDatabase();
 
+// SQL expression that decides whether a product counts as "tenis" under the
+// current business rules. Kept as a single source of truth so it can be used
+// both in the one-time backfill and in the triggers that keep it up to date.
+const IS_TENIS_EXPR = `
+  CASE WHEN (
+    (
+      UPPER(title) LIKE '%TENIS%'
+      OR UPPER(title) LIKE '%SPORT%'
+      OR UPPER(specifications) LIKE '%"subcategor\u00eda":"correr"%'
+      OR UPPER(specifications) LIKE '%"subcategor\u00eda":"skate"%'
+      OR UPPER(specifications) LIKE '%"subcategor\u00eda":"futbol"%'
+      OR UPPER(specifications) LIKE '%"subcategor\u00eda":"entrenamiento"%'
+      OR UPPER(specifications) LIKE '%"subcategor\u00eda":"basketball"%'
+      OR UPPER(specifications) LIKE '%"subcategor\u00eda":"padel"%'
+      OR UPPER(specifications) LIKE '%"subcategor\u00eda":"caminar"%'
+    )
+    AND NOT (
+      (
+        UPPER(title) LIKE '%MOCASIN%'
+        OR UPPER(title) LIKE '%MOCAS\u00cdN%'
+        OR UPPER(brand) IN ('SHOSH','MANET')
+        OR UPPER(specifications) LIKE '%"subcategor\u00eda":"choclo"%'
+      )
+      AND UPPER(title) NOT LIKE '%TENIS%'
+      AND UPPER(title) NOT LIKE '%SPORT%'
+    )
+  ) THEN 1 ELSE 0 END
+`;
+
 async function initializeDatabase() {
   try {
+    await ensureInitialSync();
+
     // Enable WAL mode and busy timeout for better write performance and concurrency (local files only)
     if (dbUrl.startsWith('file:')) {
       try {
@@ -115,6 +174,97 @@ async function initializeDatabase() {
     await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)");
     await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_gender ON products(gender)");
     await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand)");
+
+    // Migration: precomputed is_tenis flag so the "solo tenis" filter used on
+    // almost every product-listing query no longer has to evaluate ~10 LIKE
+    // '%...%' comparisons (unindexable) against every single row on every request.
+    try {
+      await dbQuery.run("ALTER TABLE products ADD COLUMN is_tenis INTEGER DEFAULT 0");
+      console.log('Migrated: is_tenis column added to products.');
+    } catch (e) {
+      // column likely already exists
+    }
+    await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_is_tenis ON products(status, is_tenis, is_bestseller DESC, id DESC)");
+
+    // Backfill is_tenis for any row where it hasn't been computed yet.
+    // Cheap no-op after the first run since we only touch rows that need it.
+    try {
+      const pending = await dbQuery.get(`SELECT COUNT(*) as cnt FROM products WHERE is_tenis IS NULL OR is_tenis = 0`);
+      if (pending && pending.cnt > 0) {
+        await dbQuery.run(`UPDATE products SET is_tenis = ${IS_TENIS_EXPR}`);
+        console.log(`Backfilled is_tenis for products table.`);
+      }
+    } catch (err) {
+      console.warn('Could not backfill is_tenis:', err.message);
+    }
+
+    // Triggers keep is_tenis correct automatically whenever a product is
+    // inserted or its title/specifications/brand change (e.g. from the scraper).
+    await dbQuery.run(`
+      CREATE TRIGGER IF NOT EXISTS trg_products_is_tenis_insert
+      AFTER INSERT ON products
+      BEGIN
+        UPDATE products SET is_tenis = ${IS_TENIS_EXPR} WHERE id = NEW.id;
+      END;
+    `);
+    await dbQuery.run(`
+      CREATE TRIGGER IF NOT EXISTS trg_products_is_tenis_update
+      AFTER UPDATE OF title, specifications, brand ON products
+      BEGIN
+        UPDATE products SET is_tenis = ${IS_TENIS_EXPR} WHERE id = NEW.id;
+      END;
+    `);
+    console.log('is_tenis column, index and triggers verified/created.');
+
+    // Full-text search index for products. Replaces the old
+    // "title LIKE ? OR brand LIKE ? OR sku LIKE ? OR description LIKE ?"
+    // (leading-wildcard LIKE can never use an index -> full table scan on
+    // every keystroke) with an indexed FTS5 lookup.
+    await dbQuery.run(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
+        id UNINDEXED,
+        title,
+        brand,
+        sku,
+        description,
+        tokenize = 'unicode61 remove_diacritics 2'
+      )
+    `);
+
+    const ftsCount = await dbQuery.get('SELECT COUNT(*) as cnt FROM products_fts');
+    if (!ftsCount || ftsCount.cnt === 0) {
+      await dbQuery.run(`
+        INSERT INTO products_fts (id, title, brand, sku, description)
+        SELECT id, title, brand, sku, description FROM products
+      `);
+      console.log('products_fts populated from existing products.');
+    }
+
+    await dbQuery.run(`
+      CREATE TRIGGER IF NOT EXISTS trg_products_fts_insert
+      AFTER INSERT ON products
+      BEGIN
+        INSERT INTO products_fts (id, title, brand, sku, description)
+        VALUES (NEW.id, NEW.title, NEW.brand, NEW.sku, NEW.description);
+      END;
+    `);
+    await dbQuery.run(`
+      CREATE TRIGGER IF NOT EXISTS trg_products_fts_update
+      AFTER UPDATE OF title, brand, sku, description ON products
+      BEGIN
+        DELETE FROM products_fts WHERE id = OLD.id;
+        INSERT INTO products_fts (id, title, brand, sku, description)
+        VALUES (NEW.id, NEW.title, NEW.brand, NEW.sku, NEW.description);
+      END;
+    `);
+    await dbQuery.run(`
+      CREATE TRIGGER IF NOT EXISTS trg_products_fts_delete
+      AFTER DELETE ON products
+      BEGIN
+        DELETE FROM products_fts WHERE id = OLD.id;
+      END;
+    `);
+    console.log('products_fts triggers verified/created.');
     console.log('Products table indexes verified/created.');
 
     // Migration for products table: add category if not present

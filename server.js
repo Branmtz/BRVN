@@ -99,8 +99,13 @@ const EXCLUIR_SQL = `NOT (
   AND UPPER(title) NOT LIKE '%SPORT%'
 )`;
 
-// Filtro final combinado
-const TENIS_FILTER_SQL = `(${TENIS_BASE_SQL} AND ${EXCLUIR_SQL})`;
+// Filtro final combinado (lógica original, ver database.js:IS_TENIS_EXPR).
+// Se mantiene aquí solo como referencia/documentación de las reglas; las
+// queries reales ahora usan la columna precalculada `is_tenis` (con índice)
+// en vez de evaluar estos LIKE en cada request.
+const TENIS_BASE_SQL_REF = TENIS_BASE_SQL;
+const EXCLUIR_SQL_REF = EXCLUIR_SQL;
+const TENIS_FILTER_SQL = 'is_tenis = 1';
 
 function getProductTypeJS(p) {
   const title = (p.title || '').toUpperCase();
@@ -402,10 +407,17 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
       }
     }
 
-    if (req.query.search) {
-      const s = `%${req.query.search.trim().toLowerCase()}%`;
-      whereClauses.push("(title LIKE ? OR brand LIKE ? OR sku LIKE ? OR description LIKE ?)");
-      params.push(s, s, s, s);
+    if (req.query.search && req.query.search.trim()) {
+      // FTS5 match: indexed lookup instead of a 4-column LIKE '%term%' full
+      // table scan. Wrap each token with * for prefix matching (so "adid"
+      // matches "adidas") and escape double quotes for the FTS syntax.
+      const ftsQuery = req.query.search
+        .trim()
+        .split(/\s+/)
+        .map(term => `"${term.replace(/"/g, '""')}"*`)
+        .join(' ');
+      whereClauses.push(`id IN (SELECT id FROM products_fts WHERE products_fts MATCH ?)`);
+      params.push(ftsQuery);
     }
 
     if (req.query.brand && req.query.brand !== 'all') {
@@ -468,44 +480,49 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
 
     const where = whereClauses.join(' AND ');
 
-    const products = await dbQuery.all(
-      `SELECT * FROM products WHERE ${where} ORDER BY is_bestseller DESC, id DESC LIMIT ? OFFSET ?`,
-      [...params, parseInt(limit), offset]
-    );
+    // products + total count don't depend on each other -> run concurrently
+    // instead of paying two sequential network round-trips.
+    const [products, totalRow] = await Promise.all([
+      dbQuery.all(
+        `SELECT * FROM products WHERE ${where} ORDER BY is_bestseller DESC, id DESC LIMIT ? OFFSET ?`,
+        [...params, parseInt(limit), offset]
+      ),
+      dbQuery.get(
+        `SELECT COUNT(*) as total FROM products WHERE ${where}`,
+        params
+      )
+    ]);
 
-    const totalRow = await dbQuery.get(
-      `SELECT COUNT(*) as total FROM products WHERE ${where}`,
-      params
-    );
-
-    // Fetch average ratings only for this batch
     const productIds = products.map(p => p.id);
-    let ratingsMap = {};
-    if (productIds.length > 0) {
-      const placeholders = productIds.map(() => '?').join(',');
-      const ratingsData = await dbQuery.all(
-        `SELECT product_id, AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings WHERE product_id IN (${placeholders}) GROUP BY product_id`,
-        productIds
-      );
-      ratingsData.forEach(r => {
-        ratingsMap[r.product_id] = {
-          average: r.avgRating ? parseFloat(r.avgRating.toFixed(1)) : 0,
-          count: r.countRating || 0
-        };
-      });
-    }
-
-    // Fetch favorites if customer is logged in
     const customerId = req.customer ? req.customer.id : null;
-    const favoriteIds = new Set();
-    if (customerId && productIds.length > 0) {
-      const placeholders = productIds.map(() => '?').join(',');
-      const favs = await dbQuery.all(
-        `SELECT product_id FROM favorites WHERE customer_id = ? AND product_id IN (${placeholders})`,
-        [customerId, ...productIds]
-      );
-      favs.forEach(f => favoriteIds.add(f.product_id));
-    }
+    const placeholders = productIds.map(() => '?').join(',');
+
+    // Ratings and favorites both only depend on productIds, not on each
+    // other -> also run concurrently.
+    const [ratingsData, favs] = await Promise.all([
+      productIds.length > 0
+        ? dbQuery.all(
+            `SELECT product_id, AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings WHERE product_id IN (${placeholders}) GROUP BY product_id`,
+            productIds
+          )
+        : Promise.resolve([]),
+      customerId && productIds.length > 0
+        ? dbQuery.all(
+            `SELECT product_id FROM favorites WHERE customer_id = ? AND product_id IN (${placeholders})`,
+            [customerId, ...productIds]
+          )
+        : Promise.resolve([])
+    ]);
+
+    const ratingsMap = {};
+    ratingsData.forEach(r => {
+      ratingsMap[r.product_id] = {
+        average: r.avgRating ? parseFloat(r.avgRating.toFixed(1)) : 0,
+        count: r.countRating || 0
+      };
+    });
+
+    const favoriteIds = new Set(favs.map(f => f.product_id));
 
     const mappedProducts = products.map(p => ({
       ...p,
@@ -689,19 +706,21 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
 // GET Single product detail (Non-blocking: returns cached db values instantly)
 app.get('/api/products/:id', optionalAuthenticateCustomer, async (req, res) => {
   try {
-    const product = await dbQuery.get("SELECT * FROM products WHERE id = ?", [req.params.id]);
-    if (!product) return res.status(404).json({ error: 'Producto no encontrado.' });
-    
-    // Fetch average rating
-    const ratingResult = await dbQuery.get("SELECT AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings WHERE product_id = ?", [product.id]);
-    
-    // Fetch favorite status
     const customerId = req.customer ? req.customer.id : null;
-    let isFavorite = false;
-    if (customerId) {
-      const fav = await dbQuery.get("SELECT 1 FROM favorites WHERE customer_id = ? AND product_id = ?", [customerId, product.id]);
-      isFavorite = !!fav;
-    }
+
+    // product, rating and favorite status don't depend on each other (we
+    // already have req.params.id and customerId up front) -> fetch all three
+    // concurrently instead of three sequential round-trips.
+    const [product, ratingResult, fav] = await Promise.all([
+      dbQuery.get("SELECT * FROM products WHERE id = ?", [req.params.id]),
+      dbQuery.get("SELECT AVG(rating) as avgRating, COUNT(rating) as countRating FROM ratings WHERE product_id = ?", [req.params.id]),
+      customerId
+        ? dbQuery.get("SELECT 1 FROM favorites WHERE customer_id = ? AND product_id = ?", [customerId, req.params.id])
+        : Promise.resolve(null)
+    ]);
+
+    if (!product) return res.status(404).json({ error: 'Producto no encontrado.' });
+    const isFavorite = !!fav;
     
     const parsedSizes = Array.from(new Set(JSON.parse(product.sizes || '[]')));
     const sortedSizes = parsedSizes.sort((a, b) => {
