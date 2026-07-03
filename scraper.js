@@ -1,3 +1,7 @@
+// Force Playwright to use a local browser directory for Render deployment compatibility
+const path = require('path');
+process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(__dirname, 'ms-playwright');
+
 const { chromium } = require('playwright');
 const { dbQuery } = require('./database');
 

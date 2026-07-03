@@ -23,6 +23,14 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date(),
+    commit: 'a342a1e-v2'
+  });
+});
+
 // Logistics / Shipping Router
 app.use(require('./shipping'));
 

@@ -10,3 +10,4 @@ yarn-error.log*
 .pnpm-debug.log*
 
 .vercel
+ms-playwright/
