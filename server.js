@@ -3,7 +3,8 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { dbQuery } = require('./database');
-const { runScraper, verifyLiveStock, syncSingleProductLive } = require('./scraper');
+const { runScraper } = require('./scraper');
+const { verifyLiveStock, syncSingleProductLive } = require('./sizes-scraper');
 const {
   runBulkComparison,
   getComparisonState,

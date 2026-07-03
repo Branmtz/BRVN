@@ -17,7 +17,9 @@
     "jsonwebtoken": "^9.0.2",
     "mercadopago": "^3.1.0",
     "nodemailer": "^8.0.11",
-    "playwright": "^1.44.1",
     "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "playwright": "^1.44.1"
   }
 }
