@@ -536,126 +536,170 @@ function findSizesInJSON(obj) {
 }
 
 /**
- * Performs a live stock verification for a single product directly on Price Shoes
- * checks specifically for the quantity available in the online store (Tienda Virtual).
+ * Helper to fetch AWS Cognito guest token from Price Shoes revalidate endpoint
  */
-async function verifyLiveStock(originalUrl, size) {
-  console.log(`[Live Stock Check] Verifying size "${size}" on: ${originalUrl} for Tienda Virtual`);
-  let browser;
-  let context;
-  let page;
-  let inStock = false;
-  
+async function getCognitoToken() {
+  const revalidateUrl = "https://www.priceshoes.com/api/auth/revalidate";
   try {
-    browser = await getBrowserInstance();
-    context = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    const res = await fetch(revalidateUrl, {
+      method: "POST",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.priceshoes.com/"
+      }
     });
-    page = await context.newPage();
-    
-    let targetStoreStock = null;
-    const targetSizeStr = size.toString().trim();
-    
-    // Set up response listener to find Tienda Virtual stock
-    page.on('response', async (response) => {
-      const url = response.url();
-      if (url.includes('nearby-stores/inventories/')) {
-        try {
-          const text = await response.text();
-          const json = JSON.parse(text);
-          const sizeLabel = (json.size_label || '').toString().trim();
-          
-          const responseSizeFloat = parseFloat(sizeLabel);
-          const targetSizeFloat = parseFloat(targetSizeStr);
-          
-          if (!isNaN(responseSizeFloat) && !isNaN(targetSizeFloat) && responseSizeFloat === targetSizeFloat) {
-            const inventories = json.store_inventories || [];
-            const onlineInfo = inventories.find(store => {
-              const name = (store.store_name || '').toLowerCase().trim();
-              return name === 'tienda virtual' || 
-                     name === 'ecommerce' || 
-                     name === 'virtual' || 
-                     name === 'online';
-            });
-            if (onlineInfo) {
-              targetStoreStock = parseInt(onlineInfo.quantity) || 0;
-              console.log(`[Live Stock Check] Intercepted size ${sizeLabel} for Tienda Virtual: stock = ${targetStoreStock}`);
+    if (!res.ok) throw new Error(`HTTP status ${res.status}`);
+    const token = await res.json();
+    return token;
+  } catch (err) {
+    console.error("[Cognito Token] Failed to fetch guest token:", err.message);
+    return null;
+  }
+}
+
+/**
+ * Extracts size options from the product detail page HTML __NEXT_DATA__
+ */
+async function getProductSizesFromHTML(originalUrl) {
+  try {
+    const res = await fetch(originalUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      }
+    });
+    if (!res.ok) throw new Error(`Failed to load page HTML, status: ${res.status}`);
+    const html = await res.text();
+    const match = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+    if (match && match[1]) {
+      const nextData = JSON.parse(match[1].trim());
+      const product = nextData.props?.pageProps?.productInitial;
+      if (product && Array.isArray(product.children)) {
+        const sizes = [];
+        for (const child of product.children) {
+          if (Array.isArray(child.custom_attributes)) {
+            const sizeAttr = child.custom_attributes.find(attr => attr.attribute_code === 'size_label');
+            if (sizeAttr && sizeAttr.value) {
+              sizes.push(sizeAttr.value.toString().trim());
             }
           }
-        } catch (e) {
-          // ignore json errors
         }
-      }
-    });
-
-    // Block images, stylesheets, fonts, media, and third-party trackers to make load ultra fast
-    await page.route('**/*', (route) => {
-      const url = route.request().url();
-      const type = route.request().resourceType();
-      
-      const isTrackerOrUnneeded = 
-        url.includes('google-analytics') || 
-        url.includes('analytics') || 
-        url.includes('gtm.js') || 
-        url.includes('facebook') || 
-        url.includes('pixel') || 
-        url.includes('hotjar') || 
-        url.includes('doubleclick') || 
-        url.includes('ads') || 
-        url.includes('sentry') || 
-        url.includes('clarity.ms') ||
-        url.includes('datadog');
-
-      if (['image', 'stylesheet', 'font', 'media'].includes(type) || isTrackerOrUnneeded) {
-        route.abort();
-      } else {
-        route.continue();
-      }
-    });
-    
-    await page.goto(originalUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-    
-    const storeBtn = page.locator('text=/Ver disponibilidad en tiendas/i');
-    // Wait for the button to appear in the DOM
-    await storeBtn.first().waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
-    
-    if (await storeBtn.count() > 0) {
-      await storeBtn.first().dispatchEvent('click');
-      
-      // Wait for responses (max 6 seconds)
-      const startTime = Date.now();
-      while (targetStoreStock === null && Date.now() - startTime < 6000) {
-        await page.waitForTimeout(150);
-      }
-    }
-    
-    if (targetStoreStock !== null) {
-      inStock = targetStoreStock > 0;
-      console.log(`[Live Stock Check] Results for Tienda Virtual: stock = ${targetStoreStock}, inStock = ${inStock}`);
-    } else {
-      // Fallback: check __NEXT_DATA__
-      console.warn('[Live Stock Check] Intercept failed. Falling back to general ecommerce sizes.');
-      const nextDataText = await page.locator('script#__NEXT_DATA__').innerText();
-      const nextData = JSON.parse(nextDataText);
-      const sizes = findSizesInJSON(nextData);
-      if (sizes && sizes.length > 0) {
-        inStock = sizes.map(s => parseFloat(s)).includes(parseFloat(targetSizeStr));
+        if (sizes.length > 0) {
+          return Array.from(new Set(sizes));
+        }
       }
     }
   } catch (err) {
-    console.error('[Live Stock Check] Error or Playwright launch failed. Defaulting to inStock = true:', err.message);
-    // If check fails (e.g. timeout or Playwright missing in serverless), default to true to allow sale, but log it
-    inStock = true;
-  } finally {
-    if (page) {
-      try { await page.close(); } catch (e) {}
-    }
-    if (context) {
-      try { await context.close(); } catch (e) {}
-    }
+    console.error("[Sizes HTML Extractor] Error:", err.message);
   }
+  return null;
+}
+
+/**
+ * Queries the store inventories API for all sizes in parallel
+ */
+async function getLiveStockFromAPI(sku, sizes, token) {
+  const sizesStock = {};
+  let totalStock = 0;
   
-  return inStock;
+  const promises = sizes.map(async (size) => {
+    const url = `https://api.priceshoes.digital/v1/api-composer/nearby-stores/inventories/?product_id=${sku}&size=${size}&lat=19.451054&lon=-99.125519&radius=1000000&dark_store_id=29`;
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Referer": "https://www.priceshoes.com/"
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const inventories = data.store_inventories || [];
+        // Look for the online store (synonyms: Ecommerce, Tienda virtual, Virtual, Tienda Virtual, Online)
+        const onlineInfo = inventories.find(store => {
+          const name = (store.store_name || '').toUpperCase();
+          return name === 'ECOMMERCE' || name === 'TIENDA VIRTUAL' || name === 'VIRTUAL' || name === 'ONLINE';
+        });
+        if (onlineInfo) {
+          const qty = parseInt(onlineInfo.quantity) || 0;
+          sizesStock[size] = qty;
+          if (qty > 0) {
+            totalStock += qty;
+          }
+        } else {
+          sizesStock[size] = 0;
+        }
+      } else {
+        sizesStock[size] = 0;
+      }
+    } catch (e) {
+      console.warn(`[Live Stock API] Error checking size ${size}:`, e.message);
+      sizesStock[size] = 0;
+    }
+  });
+
+  await Promise.all(promises);
+
+  // Return the active sizes (only sizes with stock > 0)
+  const activeSizes = Object.keys(sizesStock).filter(size => sizesStock[size] > 0);
+
+  return {
+    sizes: activeSizes,
+    stock: totalStock,
+    sizesStock: sizesStock
+  };
+}
+
+/**
+ * Performs a live stock verification for a single product directly on Price Shoes
+ * checks specifically for the quantity available in the online store (Tienda Virtual).
+ */
+async function verifyLiveStock(originalUrl, size, productSku = null) {
+  console.log(`[Live Stock Check] Verifying size "${size}" on: ${originalUrl} (SKU: ${productSku})`);
+  
+  let sku = productSku;
+  if (!sku) {
+    // Fallback: extract from URL
+    const match = originalUrl.match(/(\d+)(?:\?|$)/);
+    sku = match ? match[1] : null;
+  }
+  if (!sku) {
+    console.error("[Live Stock Check] Could not resolve SKU for URL:", originalUrl);
+    return true; // Allow checkout on error to not block sales
+  }
+
+  const token = await getCognitoToken();
+  if (!token) {
+    console.warn("[Live Stock Check] Could not retrieve auth token. Defaulting to true.");
+    return true;
+  }
+
+  // Query stock for this specific size
+  const url = `https://api.priceshoes.digital/v1/api-composer/nearby-stores/inventories/?product_id=${sku}&size=${size}&lat=19.451054&lon=-99.125519&radius=1000000&dark_store_id=29`;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://www.priceshoes.com/"
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const inventories = data.store_inventories || [];
+      const onlineInfo = inventories.find(store => {
+        const name = (store.store_name || '').toUpperCase();
+        return name === 'ECOMMERCE' || name === 'TIENDA VIRTUAL' || name === 'VIRTUAL' || name === 'ONLINE';
+      });
+      if (onlineInfo) {
+        const qty = parseInt(onlineInfo.quantity) || 0;
+        console.log(`[Live Stock Check] Verified size "${size}" stock in Ecommerce: ${qty}`);
+        return qty > 0;
+      }
+    }
+  } catch (err) {
+    console.error("[Live Stock Check] Failed to query live API:", err.message);
+  }
+  return true; // Fallback
 }
 
 /**
@@ -667,27 +711,38 @@ async function syncSingleProductLive(product) {
   if (!product || product.origin !== 'priceshoes') return null;
 
   console.log(`[On-Demand Sync] Triggering live Tienda Virtual stock sync for SKU: ${product.sku} (${product.id})...`);
-  let browser;
+  
   try {
-    // 1. Parse current sizes to pass as fallback sizes
-    let fallbackSizes = [];
-    try {
-      const parsed = typeof product.sizes === 'string' ? JSON.parse(product.sizes) : (product.sizes || []);
-      fallbackSizes = Array.from(new Set(parsed));
-    } catch (e) {
-      fallbackSizes = [];
+    // 1. Get Cognito token
+    const token = await getCognitoToken();
+    if (!token) {
+      throw new Error("Failed to retrieve guest token from Price Shoes");
     }
 
-    // 2. Get browser singleton
-    browser = await getBrowserInstance();
+    // 2. Try to get fresh sizes list from HTML __NEXT_DATA__
+    let sizes = await getProductSizesFromHTML(product.original_url);
+    if (!sizes || sizes.length === 0) {
+      // Fallback: use database sizes
+      try {
+        const parsed = typeof product.sizes === 'string' ? JSON.parse(product.sizes) : (product.sizes || []);
+        sizes = Array.from(new Set(parsed));
+      } catch (e) {
+        sizes = [];
+      }
+    }
 
-    // 3. Get online store (Tienda Virtual) sizes
-    const onlineStoreData = await getOnlineStoreSizes(browser, product.original_url, fallbackSizes);
+    if (!sizes || sizes.length === 0) {
+      console.log(`[On-Demand Sync] No sizes found for SKU: ${product.sku}. Skipping.`);
+      return {
+        sizes: [],
+        stock: 0,
+        sizes_stock: {}
+      };
+    }
+
+    // 3. Query stock for all sizes in parallel
+    const stockData = await getLiveStockFromAPI(product.sku, sizes, token);
     
-    const sizes = onlineStoreData.sizes;
-    const stock = onlineStoreData.stock;
-    const sizesStock = onlineStoreData.sizesStock;
-
     // 4. Update the DB
     await dbQuery.run(`
       UPDATE products SET
@@ -696,17 +751,17 @@ async function syncSingleProductLive(product) {
         stock = ?
       WHERE id = ?
     `, [
-      JSON.stringify(sizes),
-      JSON.stringify(sizesStock),
-      stock,
+      JSON.stringify(stockData.sizes),
+      JSON.stringify(stockData.sizesStock),
+      stockData.stock,
       product.id
     ]);
 
-    console.log(`[On-Demand Sync] Live sync successful for SKU: ${product.sku}. Stock: ${stock}.`);
+    console.log(`[On-Demand Sync] Live sync successful for SKU: ${product.sku}. Stock: ${stockData.stock}.`);
     return {
-      sizes,
-      stock,
-      sizes_stock: sizesStock
+      sizes: stockData.sizes,
+      stock: stockData.stock,
+      sizes_stock: stockData.sizesStock
     };
   } catch (err) {
     console.error(`[On-Demand Sync] Failed live sync for product ID ${product.id}:`, err.message);
@@ -715,8 +770,6 @@ async function syncSingleProductLive(product) {
       error: err.message,
       stack: err.stack
     };
-  } finally {
-    // Persistent browser is kept open for subsequent requests.
   }
 }
 
