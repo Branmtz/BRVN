@@ -367,11 +367,12 @@ async function runScraper(searchUrl, productLimit = 30, category = 'General', fi
             }
           }
           
-          // Skip online store stock verification based on user request.
-          // Real-time stock will be fetched on demand when clicking "Ver más".
-          const sizes = fallbackSizes;
-          const stock = 0;
-          const sizesStock = {};
+          // Query the online store (Tienda Virtual) stock for this product
+          console.log(`[Scraper] Querying Tienda Virtual stock for product: ${title} (${sku})`);
+          const onlineStoreData = await getOnlineStoreSizes(browser, originalUrl, fallbackSizes);
+          const sizes = onlineStoreData.sizes;
+          const stock = onlineStoreData.stock;
+          const sizesStock = onlineStoreData.sizesStock;
           
           // Detect bestseller status from API labels/flags
           const hasBestsellerLabel = (source.bestseller === true) || (Array.isArray(source.labels) && source.labels.some(label => {

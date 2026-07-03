@@ -7,8 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "dev:local": "node --watch-path=server.js --watch-path=scraper.js --watch-path=database.js --watch-path=public run-local.js",
-    "postinstall": "node postinstall.js"
+    "dev:local": "node --watch-path=server.js --watch-path=scraper.js --watch-path=database.js --watch-path=public run-local.js"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
