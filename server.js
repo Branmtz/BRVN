@@ -3,8 +3,7 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { dbQuery } = require('./database');
-const { runScraper } = require('./scraper');
-const { verifyLiveStock, syncSingleProductLive } = require('./sizes-scraper');
+const { runScraper, verifyLiveStock, syncSingleProductLive } = require('./scraper');
 const {
   runBulkComparison,
   getComparisonState,
@@ -61,11 +60,23 @@ function rateLimiter(limit, windowMs) {
  * NOTA: Solo productos PAPS propios (supplier_price <= 1) usan precio directo.
  *   Todos los demás (incluyendo PS a $99) pasan por la fórmula completa.
  */
+// Comisión escalonada por rango de costo de proveedor. Reemplaza la comisión
+// fija de $200, que hacía que productos baratos quedaran fuera de precio de
+// mercado (el markup % era altísimo en costos bajos) mientras que en
+// productos caros sobraba margen sin usar.
+function getComisionEscalonada(supplierPrice) {
+  if (supplierPrice < 500) return 80;
+  if (supplierPrice < 1200) return 150;
+  if (supplierPrice < 2500) return 220;
+  return 300;
+}
+
 function calculatePrice(supplierPrice) {
   if (!supplierPrice || supplierPrice <= 0) return 0;
   // Solo productos propios PAPS (Picafresa) con precio simbólico usan precio directo
   if (supplierPrice <= 1) return supplierPrice;
-  const raw = (supplierPrice + 200 + 100) / (1 - 0.034);
+  const comision = getComisionEscalonada(supplierPrice);
+  const raw = (supplierPrice + comision + 100) / (1 - 0.034);
   // Redondeo psicológico: siguiente múltiplo de 50, menos 1
   return Math.ceil(raw / 50) * 50 - 1;
 }
@@ -760,9 +771,6 @@ app.get('/api/products/:id/sync', optionalAuthenticateCustomer, async (req, res)
       try {
         const liveData = await syncSingleProductLive(product);
         if (liveData) {
-          if (liveData.success === false) {
-            return res.json(liveData);
-          }
           const sortedSizes = liveData.sizes.sort((a, b) => {
             const numA = parseFloat(a);
             const numB = parseFloat(b);
@@ -854,6 +862,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     // 1. Calculate secure total from DB prices (prevent client-side tampering)
     let itemsSubtotal = 0;
     const finalItems = [];
+    const stockReviewFlags = []; // items whose live stock could not be confirmed
     
     for (const item of items) {
       const product = await dbQuery.get("SELECT * FROM products WHERE id = ?", [item.id]);
@@ -874,15 +883,34 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
         });
       }
       
+      // Real-time stock verification for Price Shoes dropshipping products.
+      // Three possible outcomes:
+      //  - 'out_of_stock' (confirmed): block the sale, same as before.
+      //  - 'in_stock' (confirmed): proceed normally.
+      //  - 'unverified' (check itself failed): per business rule, we still
+      //    let the sale go through (don't lose a paying customer over a
+      //    scraper hiccup) but flag the order so an admin manually confirms
+      //    availability with the supplier before it ships.
       if (product.origin === 'priceshoes' && product.original_url) {
-        const isStillInStock = await verifyLiveStock(product.original_url, item.size, product.sku);
-        if (!isStillInStock) {
-          // If the size is out of stock on Price Shoes, remove it from our local database to keep it updated
+        const liveCheck = await verifyLiveStock(product.original_url, item.size);
+
+        if (liveCheck.status === 'out_of_stock') {
+          // Confirmed gone on Price Shoes -> remove it from our local database to keep it updated
           const updatedSizes = sizesArray.filter(s => s.toString().trim() !== item.size.toString().trim());
           await dbQuery.run("UPDATE products SET sizes = ? WHERE id = ?", [JSON.stringify(updatedSizes), product.id]);
           
           return res.status(400).json({ 
             error: `Lo sentimos, el producto "${product.title}" se acaba de agotar en la talla ${item.size} en el almacén del proveedor. Tu saldo no ha sido cobrado.` 
+          });
+        }
+
+        if (liveCheck.status === 'unverified') {
+          console.warn(`[Checkout] Stock could not be verified for SKU ${product.sku} talla ${item.size}. Flagging order for manual review.`);
+          stockReviewFlags.push({
+            sku: product.sku,
+            title: product.title,
+            size: item.size,
+            reason: 'No se pudo verificar el stock en tiempo real con el proveedor al momento de la compra.'
           });
         }
       }
@@ -937,8 +965,8 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
     const shippingCostToSave = shippingCarrier && shippingCarrier.toLowerCase().includes('recoger') ? 0 : selectedShippingCost;
     await dbQuery.run(`
       INSERT INTO orders (
-        id, customer_name, customer_email, customer_phone, shipping_address, items, total, status, customer_id, shipping_carrier, coupon_code, shipping_cost
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+        id, customer_name, customer_email, customer_phone, shipping_address, items, total, status, customer_id, shipping_carrier, coupon_code, shipping_cost, stock_review_needed, stock_review_notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
     `, [
       orderFolio,
       customerName,
@@ -950,7 +978,9 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       customerId,
       finalCarrierName,
       coupon ? coupon.code : null,
-      shippingCostToSave
+      shippingCostToSave,
+      stockReviewFlags.length > 0 ? 1 : 0,
+      stockReviewFlags.length > 0 ? JSON.stringify(stockReviewFlags) : null
     ]);
 
     // Bypassing payment preference creation for zero cost test checkout
