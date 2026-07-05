@@ -175,6 +175,26 @@ async function initializeDatabase() {
     await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_gender ON products(gender)");
     await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand)");
 
+    // Migration: created_at so the sales-prediction model can know how long
+    // a product has existed (needed to tell "genuinely no demand" apart from
+    // "just added, no data yet"). NOTE: Turso's remote engine rejects
+    // DEFAULT CURRENT_TIMESTAMP inside ALTER TABLE ADD COLUMN (this differs
+    // from a plain local SQLite file, where it's silently accepted) - so the
+    // column is added with no default, then backfilled explicitly in a
+    // separate UPDATE. New inserts that don't set it will simply get NULL,
+    // which is fine since the model doesn't require it to be present.
+    try {
+      await dbQuery.run("ALTER TABLE products ADD COLUMN created_at DATETIME");
+      console.log('Migrated: created_at column added to products.');
+    } catch (e) {
+      // column likely already exists
+    }
+    try {
+      await dbQuery.run("UPDATE products SET created_at = datetime('now') WHERE created_at IS NULL");
+    } catch (e) {
+      console.warn('Could not backfill created_at:', e.message);
+    }
+
     // Migration: precomputed is_tenis flag so the "solo tenis" filter used on
     // almost every product-listing query no longer has to evaluate ~10 LIKE
     // '%...%' comparisons (unindexable) against every single row on every request.
@@ -657,7 +677,24 @@ async function initializeDatabase() {
       // column likely already exists
     }
 
-    // Migration for orders table: add coupon_code if not present
+    // Product funnel events: vistas, click en talla/color, agregado a carrito.
+    // La compra ya se puede derivar de la tabla `orders`, no se duplica aquí.
+    // session_id es un identificador anónimo generado en el navegador
+    // (localStorage), no requiere que el visitante esté registrado.
+    await dbQuery.run(`
+      CREATE TABLE IF NOT EXISTS product_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        size TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_product_events_product_type ON product_events(product_id, event_type)");
+    await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_product_events_session ON product_events(session_id, product_id, event_type)");
+    await dbQuery.run("CREATE INDEX IF NOT EXISTS idx_product_events_created_at ON product_events(created_at)");
+    console.log('product_events table and indexes verified/created.');
     try {
       await dbQuery.run("ALTER TABLE orders ADD COLUMN coupon_code TEXT DEFAULT NULL");
       console.log('Migrated: coupon_code column added to orders.');
@@ -665,35 +702,26 @@ async function initializeDatabase() {
       // column likely already exists
     }
 
-    // Seed Test Product with Price 0
+    // Migration for orders table: flag orders where live stock could not be
+    // verified at checkout time (Playwright/scraper failure) so an admin can
+    // manually confirm availability with the supplier before shipping,
+    // instead of silently assuming stock either way.
     try {
-      const testProduct = await dbQuery.get("SELECT * FROM products WHERE id = 'test-gratis'");
-      if (!testProduct) {
-        await dbQuery.run(`
-          INSERT INTO products (id, sku, title, description, price, supplier_price, images, sizes, color, gender, origin, stock, status, category, brand)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          'test-gratis',
-          'TEST-GRATIS-001',
-          'Calzado de Prueba Gratis',
-          'Calzado de prueba con precio de $0 MXN para verificar flujos de compra, historial y calificaciones sin costo.',
-          0,
-          0,
-          JSON.stringify(['/logo.png']),
-          JSON.stringify(['23', '24', '25', '26', '27', '28']),
-          'Blanco',
-          'Unisex',
-          'PAPS',
-          999,
-          'active',
-          'Pruebas',
-          'PAPS'
-        ]);
-        console.log('Seeded test product with price 0.');
-      }
-    } catch (seedErr) {
-      console.error('Error seeding test product:', seedErr.message);
+      await dbQuery.run("ALTER TABLE orders ADD COLUMN stock_review_needed INTEGER DEFAULT 0");
+      console.log('Migrated: stock_review_needed column added to orders.');
+    } catch (e) {
+      // column likely already exists
     }
+    try {
+      await dbQuery.run("ALTER TABLE orders ADD COLUMN stock_review_notes TEXT DEFAULT NULL");
+      console.log('Migrated: stock_review_notes column added to orders.');
+    } catch (e) {
+      // column likely already exists
+    }
+
+
+    // No longer seeding the test product 'test-gratis' as requested.
+
 
     // Seed Default Admin User if empty
     const adminUser = process.env.ADMIN_USERNAME || 'admin';

@@ -67,6 +67,8 @@
         <button class="admin-tab" onclick="switchTab('scraper-section', this)">Sincronizar Stock</button>
         <button class="admin-tab" id="comparador-tab-btn" onclick="switchTab('comparador-section', this); loadComparadorSection()">💰 Comparador</button>
         <button class="admin-tab" onclick="switchTab('dashboard-section', this)">Dashboard</button>
+        <button class="admin-tab" onclick="switchTab('funnel-section', this); loadFunnelReport()">🔻 Embudo de Ventas</button>
+        <button class="admin-tab" onclick="switchTab('sales-score-section', this); loadSalesScore()">🎯 Predicción de Ventas</button>
       </div>
 
       <!-- SECTION: DASHBOARD (Analytics) -->
@@ -415,10 +417,78 @@
         </div>
       </section>
 
-    </div>
+      <!-- SECTION: SALES FUNNEL -->
+      <section id="funnel-section" class="admin-section">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 12px;">
+          <h3 style="font-size: 20px; font-weight: 600; margin: 0;">Embudo de Ventas por Producto</h3>
+          <select id="funnel-days-select" onchange="loadFunnelReport()" style="padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-color); font-size: 13px;">
+            <option value="7">Últimos 7 días</option>
+            <option value="30" selected>Últimos 30 días</option>
+            <option value="90">Últimos 90 días</option>
+          </select>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 20px;">
+          Vistas → Click en talla/color → Agregado a carrito → Compra. Se cuentan sesiones únicas por etapa, no clics sueltos.
+        </p>
 
-    <!-- SECTION: COMPARADOR DE PRECIOS -->
-    <section id="comparador-section" class="admin-section">
+        <div class="table-container">
+          <table id="funnel-table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th style="text-align:center;">Vistas</th>
+                <th style="text-align:center;">→ Talla</th>
+                <th style="text-align:center;">→ Carrito</th>
+                <th style="text-align:center;">→ Compra</th>
+                <th>Mayor fuga</th>
+              </tr>
+            </thead>
+            <tbody id="funnel-table-body">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 32px;">Cargando reporte...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- SECTION: SALES PREDICTION MODEL -->
+      <section id="sales-score-section" class="admin-section">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; gap: 12px;">
+          <h3 style="font-size: 20px; font-weight: 600; margin: 0;">🎯 Predicción de Ventas — Prioridad Publicitaria</h3>
+          <button class="admin-tab" onclick="loadSalesScore()" style="padding:8px 14px;"><i class="fa-solid fa-rotate"></i> Recalcular</button>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 20px;">
+          Combina demanda estimada (con encogimiento hacia el promedio de categoría), tendencia reciente, margen real,
+          competitividad de precio vs Mercado Libre, y vistas del embudo. Ordenado de mayor a menor potencial —
+          los de arriba son los mejores candidatos para meterles publicidad.
+        </p>
+
+        <div class="table-container">
+          <table id="sales-score-table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th style="text-align:center;">Score</th>
+                <th style="text-align:center;">Demanda est./sem</th>
+                <th style="text-align:center;">Tendencia</th>
+                <th style="text-align:center;">Margen</th>
+                <th style="text-align:center;">Vs. ML</th>
+                <th style="text-align:center;">Vistas</th>
+                <th>Confianza</th>
+              </tr>
+            </thead>
+            <tbody id="sales-score-table-body">
+              <tr>
+                <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 32px;">Cargando modelo...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- SECTION: COMPARADOR DE PRECIOS -->
+      <section id="comparador-section" class="admin-section">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px;">
         <div>
           <h3 style="font-size:20px; font-weight:600; margin:0;">💰 Comparador de Precios</h3>

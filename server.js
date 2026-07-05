@@ -81,6 +81,30 @@ function calculatePrice(supplierPrice) {
   return Math.ceil(raw / 50) * 50 - 1;
 }
 
+// Precio bajo la fórmula anterior (comisión fija de $200). Se usa únicamente
+// como referencia para mostrar "antes $X" en los productos cuyo precio bajó
+// con la comisión escalonada — no se usa para cobrar nada.
+function calculatePriceAnterior(supplierPrice) {
+  if (!supplierPrice || supplierPrice <= 0) return 0;
+  if (supplierPrice <= 1) return supplierPrice;
+  const raw = (supplierPrice + 200 + 100) / (1 - 0.034);
+  return Math.ceil(raw / 50) * 50 - 1;
+}
+
+// Devuelve { price, wasDiscounted, originalPrice, discountAmount } para un
+// producto: si el precio nuevo (comisión escalonada) es menor al que hubiera
+// tenido con la fórmula anterior, se marca como rebajado para mostrar el
+// badge de descuento en el frontend con una justificación real hacia el
+// cliente (no es una rebaja inventada, es la baja de comisión real).
+function getPricingInfo(supplierPrice) {
+  const price = calculatePrice(supplierPrice);
+  const anterior = calculatePriceAnterior(supplierPrice);
+  if (anterior > price) {
+    return { price, wasDiscounted: true, originalPrice: anterior, discountAmount: anterior - price };
+  }
+  return { price, wasDiscounted: false, originalPrice: null, discountAmount: 0 };
+}
+
 // ─────────────────────────────────────────────
 // Filtro SQL global: solo tenis, sin mocasines ni marcas excluidas
 // ─────────────────────────────────────────────
@@ -536,14 +560,20 @@ app.get('/api/products', optionalAuthenticateCustomer, async (req, res) => {
 
     const favoriteIds = new Set(favs.map(f => f.product_id));
 
-    const mappedProducts = products.map(p => ({
-      ...p,
-      price: calculatePrice(p.supplier_price),
-      images: JSON.parse(p.images || '[]'),
-      sizes: JSON.parse(p.sizes || '[]'),
-      isFavorite: customerId ? favoriteIds.has(p.id) : false,
-      rating: ratingsMap[p.id] || { average: 0, count: 0 }
-    }));
+    const mappedProducts = products.map(p => {
+      const pricing = getPricingInfo(p.supplier_price);
+      return {
+        ...p,
+        price: pricing.price,
+        originalPrice: pricing.originalPrice,
+        discountAmount: pricing.discountAmount,
+        wasDiscounted: pricing.wasDiscounted,
+        images: JSON.parse(p.images || '[]'),
+        sizes: JSON.parse(p.sizes || '[]'),
+        isFavorite: customerId ? favoriteIds.has(p.id) : false,
+        rating: ratingsMap[p.id] || { average: 0, count: 0 }
+      };
+    });
 
     res.json({
       products: mappedProducts,
@@ -668,10 +698,13 @@ app.get('/api/products/trends', optionalAuthenticateCustomer, async (req, res) =
     }
 
     const mappedProducts = products.map(p => {
-      const currentPrice = calculatePrice(p.supplier_price);
+      const pricing = getPricingInfo(p.supplier_price);
       return {
         ...p,
-        price: currentPrice,
+        price: pricing.price,
+        originalPrice: pricing.originalPrice,
+        discountAmount: pricing.discountAmount,
+        wasDiscounted: pricing.wasDiscounted,
         images: JSON.parse(p.images || '[]'),
         sizes: JSON.parse(p.sizes || '[]'),
         isFavorite: customerId ? favoriteIds.has(p.id) : false,
@@ -744,9 +777,13 @@ app.get('/api/products/:id', optionalAuthenticateCustomer, async (req, res) => {
       return numA - numB;
     });
 
+    const pricingDetail = getPricingInfo(product.supplier_price);
     res.json({
       ...product,
-      price: calculatePrice(product.supplier_price),
+      price: pricingDetail.price,
+      originalPrice: pricingDetail.originalPrice,
+      discountAmount: pricingDetail.discountAmount,
+      wasDiscounted: pricingDetail.wasDiscounted,
       images: JSON.parse(product.images || '[]'),
       sizes: sortedSizes,
       sizes_stock: JSON.parse(product.sizes_stock || '{}'),
@@ -1951,9 +1988,13 @@ app.get('/api/customer/favorites', authenticateCustomer, async (req, res) => {
     });
 
     const mapped = rows.map(p => {
+      const pricing = getPricingInfo(p.supplier_price);
       return {
         ...p,
-        price: calculatePrice(p.supplier_price),
+        price: pricing.price,
+        originalPrice: pricing.originalPrice,
+        discountAmount: pricing.discountAmount,
+        wasDiscounted: pricing.wasDiscounted,
         images: JSON.parse(p.images || '[]'),
         sizes: JSON.parse(p.sizes || '[]'),
         isFavorite: true,
@@ -2108,6 +2149,34 @@ app.post('/api/admin/orders/:id/tracking', authenticateAdmin, async (req, res) =
 });
 
 // GET Admin Dashboard Data Analytics
+// ─────────────────────────────────────────────
+// Tracking de embudo: vistas → click talla/color → agregado a carrito
+// La compra se deriva de `orders`, no se registra aquí.
+// ─────────────────────────────────────────────
+const VALID_EVENT_TYPES = new Set(['view', 'size_click', 'add_to_cart']);
+
+app.post('/api/track/event', rateLimiter(60, 60000), async (req, res) => {
+  try {
+    const { sessionId, productId, eventType, size } = req.body;
+    if (!sessionId || !productId || !VALID_EVENT_TYPES.has(eventType)) {
+      return res.status(400).json({ error: 'Datos de evento inválidos.' });
+    }
+    // Truncate defensively: this is public input, keep it small and inert.
+    const safeSessionId = String(sessionId).slice(0, 100);
+    const safeProductId = String(productId).slice(0, 100);
+    const safeSize = size ? String(size).slice(0, 20) : null;
+
+    await dbQuery.run(
+      "INSERT INTO product_events (session_id, product_id, event_type, size) VALUES (?, ?, ?, ?)",
+      [safeSessionId, safeProductId, eventType, safeSize]
+    );
+    res.status(204).end();
+  } catch (err) {
+    // Tracking must never break the shopping experience - fail silently.
+    res.status(204).end();
+  }
+});
+
 app.get('/api/admin/analytics', authenticateAdmin, async (req, res) => {
   try {
     // 1. Core aggregates
@@ -2165,6 +2234,298 @@ app.get('/api/admin/analytics', authenticateAdmin, async (req, res) => {
   } catch (err) {
     console.error('Analytics error:', err);
     res.status(500).json({ error: 'Error al compilar analíticas.' });
+  }
+});
+
+// ─────────────────────────────────────────────
+// Modelo de predicción de ventas / Score de Prioridad Publicitaria
+//
+// Combina 5 señales para estimar qué productos tienen más potencial de
+// venta hacia adelante (no solo "qué vendió", sino "qué va a vender"),
+// incluyendo productos nuevos sin historial:
+//
+//   1. Demanda estimada semanal, con encogimiento bayesiano hacia el
+//      promedio de la categoría (evita que 1 venta aislada se lea como
+//      "vende 1/semana siempre").
+//   2. Tendencia: ¿la demanda va acelerando o desacelerando?
+//   3. Margen real por unidad (precio venta - costo proveedor).
+//   4. Competitividad de precio vs Mercado Libre (tabla price_comparisons).
+//   5. Interés (vistas del embudo) - señal temprana para productos sin
+//      ventas, mostrada aparte, no mezclada a ciegas en el score.
+//
+// score_final = demanda_estimada × margen × tendencia × competitividad
+// ─────────────────────────────────────────────
+
+const SALES_SCORE_WEEKS = 8;       // ventana de historial a considerar
+const SALES_SCORE_DECAY = 0.85;    // qué tanto pesan más las semanas recientes
+const SALES_SCORE_SHRINK_K = 4;    // fuerza del encogimiento hacia el promedio de categoría
+
+function weekIndexFromDate(date, referenceDate) {
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+  return Math.floor((referenceDate - date) / msPerWeek); // 0 = semana más reciente
+}
+
+app.get('/api/admin/sales-score', authenticateAdmin, async (req, res) => {
+  try {
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - SALES_SCORE_WEEKS * 7 * 24 * 60 * 60 * 1000);
+
+    // 1. Catálogo activo
+    const products = await dbQuery.all(
+      "SELECT id, sku, title, brand, category, gender, supplier_price, created_at FROM products WHERE status = 'active'"
+    );
+
+    // 2. Ventas confirmadas dentro de la ventana (no carritos abandonados)
+    const paidOrders = await dbQuery.all(
+      "SELECT items, created_at FROM orders WHERE status != 'pending' AND created_at >= ?",
+      [windowStart.toISOString()]
+    );
+
+    // 3. Última comparación de precio conocida por SKU
+    const comparisons = await dbQuery.all(`
+      SELECT sku, brvn_price, ml_price, compared_at
+      FROM price_comparisons
+      WHERE id IN (SELECT MAX(id) FROM price_comparisons GROUP BY sku)
+    `);
+    const comparisonBySku = {};
+    comparisons.forEach(c => { comparisonBySku[c.sku] = c; });
+
+    // 4. Vistas recientes (embudo) por producto, como señal de interés
+    const viewRows = await dbQuery.all(
+      "SELECT product_id, COUNT(DISTINCT session_id) as n FROM product_events WHERE event_type = 'view' AND created_at >= ? GROUP BY product_id",
+      [windowStart.toISOString()]
+    );
+    const viewsByProduct = {};
+    viewRows.forEach(v => { viewsByProduct[v.product_id] = v.n; });
+
+    // 5. Armar serie semanal de unidades vendidas por producto (zero-filled)
+    const weeklyUnitsByProduct = {}; // product_id -> array[SALES_SCORE_WEEKS] (índice 0 = semana más reciente)
+    products.forEach(p => { weeklyUnitsByProduct[p.id] = new Array(SALES_SCORE_WEEKS).fill(0); });
+
+    paidOrders.forEach(o => {
+      let items = [];
+      try { items = JSON.parse(o.items || '[]'); } catch (e) { items = []; }
+      const orderDate = new Date(o.created_at);
+      const wIdx = weekIndexFromDate(orderDate, now);
+      if (wIdx < 0 || wIdx >= SALES_SCORE_WEEKS) return;
+      items.forEach(it => {
+        if (it.id && weeklyUnitsByProduct[it.id]) {
+          weeklyUnitsByProduct[it.id][wIdx] += (it.qty || 1);
+        }
+      });
+    });
+
+    // 6. Tasa de venta semanal ponderada por recencia, por producto
+    function weightedRate(weeklyArr) {
+      let weightedSum = 0, weightTotal = 0;
+      for (let w = 0; w < weeklyArr.length; w++) {
+        const weight = Math.pow(SALES_SCORE_DECAY, w);
+        weightedSum += weeklyArr[w] * weight;
+        weightTotal += weight;
+      }
+      return weightTotal > 0 ? weightedSum / weightTotal : 0;
+    }
+
+    const rateByProduct = {};
+    const totalUnitsByProduct = {};
+    products.forEach(p => {
+      const weeklyArr = weeklyUnitsByProduct[p.id];
+      rateByProduct[p.id] = weightedRate(weeklyArr);
+      totalUnitsByProduct[p.id] = weeklyArr.reduce((a, b) => a + b, 0);
+    });
+
+    // 7. Promedio de categoría (para el encogimiento bayesiano)
+    const categoryRates = {}; // category -> { sum, count }
+    products.forEach(p => {
+      const cat = p.category || 'General';
+      if (!categoryRates[cat]) categoryRates[cat] = { sum: 0, count: 0 };
+      categoryRates[cat].sum += rateByProduct[p.id];
+      categoryRates[cat].count += 1;
+    });
+    const categoryAvgRate = {};
+    Object.keys(categoryRates).forEach(cat => {
+      categoryAvgRate[cat] = categoryRates[cat].count > 0
+        ? categoryRates[cat].sum / categoryRates[cat].count
+        : 0;
+    });
+
+    // 8. Tendencia: mitad reciente de la ventana vs. mitad anterior
+    function trendFactor(weeklyArr) {
+      const half = Math.floor(weeklyArr.length / 2);
+      const recent = weeklyArr.slice(0, half).reduce((a, b) => a + b, 0) / half;
+      const older = weeklyArr.slice(half).reduce((a, b) => a + b, 0) / (weeklyArr.length - half);
+      if (older === 0 && recent === 0) return 1;
+      if (older === 0) return 1.5; // pasó de 0 a algo: señal de aceleración
+      const ratio = recent / older;
+      return Math.max(0.5, Math.min(2, ratio));
+    }
+
+    // 9. Armar resultado final por producto
+    const results = products.map(p => {
+      const rateSku = rateByProduct[p.id];
+      const nSku = totalUnitsByProduct[p.id];
+      const catAvg = categoryAvgRate[p.category || 'General'] || 0;
+
+      // Encogimiento bayesiano: mientras menos historial propio, más se
+      // parece la estimación al promedio de su categoría.
+      const demandaEstimada = (nSku * rateSku + SALES_SCORE_SHRINK_K * catAvg) / (nSku + SALES_SCORE_SHRINK_K);
+
+      const tendencia = trendFactor(weeklyUnitsByProduct[p.id]);
+
+      const precioVenta = calculatePrice(p.supplier_price);
+      const margen = precioVenta - (p.supplier_price || 0);
+
+      const comparison = comparisonBySku[p.sku];
+      let competitividad = 1;
+      let mlPrice = null;
+      if (comparison && comparison.ml_price && comparison.brvn_price) {
+        mlPrice = comparison.ml_price;
+        competitividad = Math.max(0.7, Math.min(1.3, comparison.ml_price / comparison.brvn_price));
+      }
+
+      const vistas = viewsByProduct[p.id] || 0;
+
+      const score = demandaEstimada * margen * tendencia * competitividad;
+
+      let confianza = 'nuevo / sin ventas';
+      if (nSku >= 10) confianza = 'con historial sólido';
+      else if (nSku >= 1) confianza = 'poco historial';
+
+      return {
+        productId: p.id,
+        sku: p.sku,
+        title: p.title,
+        brand: p.brand,
+        category: p.category,
+        demandaEstimadaSemanal: Math.round(demandaEstimada * 100) / 100,
+        unidadesVendidasVentana: nSku,
+        tendencia: Math.round(tendencia * 100) / 100,
+        margen: Math.round(margen),
+        precioVenta,
+        mlPrice,
+        competitividad: Math.round(competitividad * 100) / 100,
+        vistasRecientes: vistas,
+        confianza,
+        score: Math.round(score * 100) / 100
+      };
+    });
+
+    results.sort((a, b) => b.score - a.score);
+
+    res.json({
+      weeks: SALES_SCORE_WEEKS,
+      generatedAt: now.toISOString(),
+      products: results
+    });
+  } catch (err) {
+    console.error('Sales score error:', err);
+    res.status(500).json({ error: 'Error al calcular el modelo de predicción de ventas.' });
+  }
+});
+
+// GET Funnel Report: vistas → click talla/color → agregado a carrito → compra
+// Cuenta SESIONES ÚNICAS por etapa (no clics sueltos) para no inflar los
+// números con gente indecisa haciendo varios clics en el mismo producto.
+app.get('/api/admin/funnel', authenticateAdmin, async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const sinceClause = `datetime('now', '-${days} days')`;
+
+    // Vistas y clicks de talla/color y agregados a carrito: sesiones únicas por producto y etapa
+    const eventRows = await dbQuery.all(`
+      SELECT product_id, event_type, COUNT(DISTINCT session_id) as n
+      FROM product_events
+      WHERE created_at >= ${sinceClause}
+      GROUP BY product_id, event_type
+    `);
+
+    // Compras confirmadas (no incluye carritos abandonados en status 'pending')
+    const paidOrders = await dbQuery.all(`
+      SELECT items FROM orders
+      WHERE status != 'pending' AND created_at >= ${sinceClause}
+    `);
+
+    const purchaseCounts = {}; // product_id -> número de órdenes que lo incluyen
+    paidOrders.forEach(o => {
+      let items = [];
+      try { items = JSON.parse(o.items || '[]'); } catch (e) { items = []; }
+      const seenInThisOrder = new Set();
+      items.forEach(it => {
+        if (it.id && !seenInThisOrder.has(it.id)) {
+          seenInThisOrder.add(it.id);
+          purchaseCounts[it.id] = (purchaseCounts[it.id] || 0) + 1;
+        }
+      });
+    });
+
+    const funnelMap = {}; // product_id -> { views, sizeClicks, addToCart, purchases }
+    eventRows.forEach(r => {
+      if (!funnelMap[r.product_id]) {
+        funnelMap[r.product_id] = { views: 0, sizeClicks: 0, addToCart: 0, purchases: 0 };
+      }
+      if (r.event_type === 'view') funnelMap[r.product_id].views = r.n;
+      if (r.event_type === 'size_click') funnelMap[r.product_id].sizeClicks = r.n;
+      if (r.event_type === 'add_to_cart') funnelMap[r.product_id].addToCart = r.n;
+    });
+    Object.keys(purchaseCounts).forEach(productId => {
+      if (!funnelMap[productId]) {
+        funnelMap[productId] = { views: 0, sizeClicks: 0, addToCart: 0, purchases: 0 };
+      }
+      funnelMap[productId].purchases = purchaseCounts[productId];
+    });
+
+    const productIds = Object.keys(funnelMap);
+    let titledRows = [];
+    if (productIds.length > 0) {
+      const placeholders = productIds.map(() => '?').join(',');
+      const productRows = await dbQuery.all(
+        `SELECT id, title, brand FROM products WHERE id IN (${placeholders})`,
+        productIds
+      );
+      const titleMap = {};
+      productRows.forEach(p => { titleMap[p.id] = { title: p.title, brand: p.brand }; });
+
+      titledRows = productIds.map(id => {
+        const f = funnelMap[id];
+        const pct = (num, den) => den > 0 ? Math.round((num / den) * 1000) / 10 : null;
+
+        const stepConversion = {
+          viewToSize: pct(f.sizeClicks, f.views),
+          sizeToCart: pct(f.addToCart, f.sizeClicks),
+          cartToPurchase: pct(f.purchases, f.addToCart)
+        };
+
+        // Identify the biggest drop-off (lowest conversion between two adjacent steps)
+        let biggestDrop = null;
+        const steps = [
+          { label: 'Vistas → Talla', value: stepConversion.viewToSize },
+          { label: 'Talla → Carrito', value: stepConversion.sizeToCart },
+          { label: 'Carrito → Compra', value: stepConversion.cartToPurchase }
+        ].filter(s => s.value !== null);
+        if (steps.length > 0) {
+          biggestDrop = steps.reduce((min, s) => s.value < min.value ? s : min, steps[0]).label;
+        }
+
+        return {
+          productId: id,
+          title: titleMap[id] ? titleMap[id].title : id,
+          brand: titleMap[id] ? titleMap[id].brand : null,
+          views: f.views,
+          sizeClicks: f.sizeClicks,
+          addToCart: f.addToCart,
+          purchases: f.purchases,
+          stepConversion,
+          biggestDrop
+        };
+      });
+
+      titledRows.sort((a, b) => b.views - a.views);
+    }
+
+    res.json({ days, products: titledRows });
+  } catch (err) {
+    console.error('Funnel report error:', err);
+    res.status(500).json({ error: 'Error al compilar el reporte del embudo.' });
   }
 });
 

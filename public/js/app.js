@@ -23,6 +23,46 @@ let currentImageIdx = 0;
 let selectedShippingRate = null;
 window.appliedCouponCode = null;
 window.appliedDiscountPercent = 0;
+
+// ─────────────────────────────────────────────
+// Tracking de embudo: vistas → click talla/color → agregado a carrito
+// Identificador anónimo por navegador, no requiere que el visitante
+// esté registrado. No bloquea la experiencia de compra si falla.
+// ─────────────────────────────────────────────
+function getAnonSessionId() {
+  let sid = localStorage.getItem('brvn_session_id');
+  if (!sid) {
+    sid = 'anon_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+    localStorage.setItem('brvn_session_id', sid);
+  }
+  return sid;
+}
+
+function trackEvent(eventType, productId, size) {
+  try {
+    const payload = JSON.stringify({
+      sessionId: getAnonSessionId(),
+      productId,
+      eventType,
+      size: size || null
+    });
+    // navigator.sendBeacon doesn't block navigation/unload and doesn't
+    // wait for a response - ideal for fire-and-forget tracking calls.
+    if (navigator.sendBeacon) {
+      const blob = new Blob([payload], { type: 'application/json' });
+      navigator.sendBeacon('/api/track/event', blob);
+    } else {
+      fetch('/api/track/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true
+      }).catch(() => {});
+    }
+  } catch (e) {
+    // Tracking must never break the shopping experience.
+  }
+}
 window.appliedDiscountType = 'percent';
 window.appliedDiscountValue = 0;
 
@@ -233,6 +273,13 @@ function buildProductCard(p, imgClass = '') {
   const originText = (isPicafresa && p.origin === 'PAPS') ? 'Dulce' : (p.origin === 'PAPS' ? 'PAPS' : 'Importado');
   const brandText = (isPicafresa && p.brand === 'PAPS') ? 'Dulce' : (p.brand || 'Calzado');
   
+  const priceHtml = p.wasDiscounted
+    ? `<span class="product-price product-price--discounted">
+         <span class="price-old">$${p.originalPrice.toLocaleString()} MXN</span>
+         <span class="price-new">$${p.price.toLocaleString()} MXN</span>
+       </span>`
+    : `<span class="product-price">$${p.price.toLocaleString()} MXN</span>`;
+
   return `
     <article class="product-card" onclick="viewProduct(event, '${p.id}')">
       <button class="favorite-btn ${heartActive}" onclick="toggleFavorite(event, '${p.id}')" title="Guardar en favoritos">
@@ -246,6 +293,11 @@ function buildProductCard(p, imgClass = '') {
         <i class="fa-solid fa-fire"></i> MÁS VENDIDOS
       </span>
       ` : ''}
+      ${p.wasDiscounted ? `
+      <span class="discount-tag">
+        <i class="fa-solid fa-tag"></i> -$${p.discountAmount.toLocaleString()} MXN
+      </span>
+      ` : ''}
       <div class="product-image-container ${imgClass}">
         <img src="${mainImg}" alt="${p.title}" loading="lazy">
       </div>
@@ -253,7 +305,7 @@ function buildProductCard(p, imgClass = '') {
         <span class="product-brand">${brandText}</span>
         <h3 class="product-title">${p.title}</h3>
         <div class="product-meta">
-          <span class="product-price">$${p.price.toLocaleString()} MXN</span>
+          ${priceHtml}
           <a href="javascript:void(0)" onclick="viewProduct(event, '${p.id}')" class="view-btn">Ver</a>
         </div>
       </div>
@@ -519,6 +571,8 @@ async function initProductDetailPage() {
     window.location.href = '/';
     return;
   }
+
+  trackEvent('view', productId);
   
   // Try to load cached product immediately (optimistic rendering)
   try {
@@ -579,6 +633,20 @@ function renderProductDetail() {
   document.getElementById('detail-brand').textContent = isPicafresa ? 'DULCE' : (p.brand || 'Calzado');
   document.getElementById('detail-title').textContent = p.title;
   document.getElementById('detail-price').textContent = `$${p.price.toLocaleString()} MXN`;
+
+  const discountInfoEl = document.getElementById('detail-discount-info');
+  if (discountInfoEl) {
+    if (p.wasDiscounted) {
+      discountInfoEl.style.display = '';
+      discountInfoEl.innerHTML = `
+        <span class="price-old">Antes $${p.originalPrice.toLocaleString()} MXN</span>
+        <span class="discount-tag"><i class="fa-solid fa-tag"></i> -$${p.discountAmount.toLocaleString()} MXN</span>
+      `;
+    } else {
+      discountInfoEl.style.display = 'none';
+      discountInfoEl.innerHTML = '';
+    }
+  }
   
   // Do not show rating stars on product details
   const ratingEl = document.getElementById('detail-rating');
@@ -772,6 +840,7 @@ function updateProductImageFromIndex() {
   cards.forEach((c, idx) => {
     if (idx === currentImageIdx) {
       c.classList.add('active');
+      c.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
     } else {
       c.classList.remove('active');
     }
@@ -780,6 +849,9 @@ function updateProductImageFromIndex() {
 
 window.selectSize = function(pillEl, size) {
   selectedSize = size;
+  if (currentProduct) {
+    trackEvent('size_click', currentProduct.id, size);
+  }
   const pills = document.querySelectorAll('.size-pill');
   pills.forEach(p => p.classList.remove('active'));
   pillEl.classList.add('active');
@@ -861,7 +933,9 @@ window.addToCart = function() {
     alert('Por favor, selecciona una talla antes de continuar.');
     return;
   }
-  
+
+  trackEvent('add_to_cart', currentProduct.id, selectedSize);
+
   const cart = JSON.parse(localStorage.getItem('paps_cart') || '[]');
   
   // Check if item with same ID and size exists

@@ -321,6 +321,20 @@ async function loadOrdersTable() {
         order.status === 'paid' ? 'Pagado' : 
         order.status === 'purchased_on_supplier' ? 'Comprado' : 'Enviado'
       }</span>`;
+
+      let stockReviewHtml = '';
+      if (order.stock_review_needed) {
+        let notes = [];
+        try { notes = JSON.parse(order.stock_review_notes || '[]'); } catch (e) {}
+        const notesHtml = notes.map(n => `• ${n.title} (Talla ${n.size}, SKU ${n.sku || 'N/A'})`).join('<br>');
+        stockReviewHtml = `
+          <div style="margin-top: 8px; padding: 10px 12px; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 8px; font-size: 13px; color: #7a5b00;">
+            <strong><i class="fa-solid fa-triangle-exclamation"></i> Verificar stock con el proveedor antes de enviar</strong><br>
+            No se pudo confirmar el stock en tiempo real al momento de la compra:<br>
+            ${notesHtml}
+          </div>
+        `;
+      }
       
       const totalQty = order.items.reduce((sum, item) => sum + (item.qty || 1), 0);
       let actionHtml = '';
@@ -390,7 +404,7 @@ async function loadOrdersTable() {
             <a href="mailto:${order.customer_email}">${order.customer_email}</a><br>
             <a href="tel:${order.customer_phone || ''}" style="color:#007aff;font-weight:600;">📞 ${order.customer_phone || 'Sin número'}</a>
           </td>
-          <td>${itemsHtml}</td>
+          <td>${itemsHtml}${stockReviewHtml}</td>
           <td><strong style="font-size:15px;">$${Number(order.total).toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2})} MXN</strong></td>
           <td style="font-size:13px;">
             <span style="font-weight:600;">${carrierName}</span><br>
@@ -442,6 +456,127 @@ window.shipOrder = async function(orderId) {
 };
 
 // ─── REPORTS: Load Sales Report Data ─────────────────────────────────────────
+async function loadSalesScore() {
+  const token = localStorage.getItem('paps_token');
+  const tbody = document.getElementById('sales-score-table-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 32px;">Calculando modelo...</td></tr>`;
+
+  try {
+    const res = await fetch('/api/admin/sales-score', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    checkResponseAuth(res);
+    if (!res.ok) throw new Error('Failed');
+    const data = await res.json();
+
+    if (!data.products || data.products.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 32px;">No hay productos activos para evaluar.</td></tr>`;
+      return;
+    }
+
+    const trendBadge = (t) => {
+      if (t > 1.1) return `<span style="color:#34c759; font-weight:600;">▲ ${t}x</span>`;
+      if (t < 0.9) return `<span style="color:#ff3b30; font-weight:600;">▼ ${t}x</span>`;
+      return `<span style="color:var(--text-secondary);">— ${t}x</span>`;
+    };
+
+    const competBadge = (comp, mlPrice) => {
+      if (mlPrice === null) return '<span style="color:var(--text-secondary);">Sin dato</span>';
+      if (comp > 1.05) return `<span style="color:#34c759; font-weight:600;">Más barato</span>`;
+      if (comp < 0.95) return `<span style="color:#ff3b30; font-weight:600;">Más caro</span>`;
+      return `<span style="color:#ff9500;">Similar</span>`;
+    };
+
+    const confBadge = (c) => {
+      let color = '#8e8e93';
+      if (c === 'con historial sólido') color = '#34c759';
+      else if (c === 'poco historial') color = '#ff9500';
+      return `<span style="font-size:11px; padding:2px 8px; border-radius:6px; background:${color}22; color:${color}; font-weight:600;">${c}</span>`;
+    };
+
+    tbody.innerHTML = data.products.slice(0, 50).map((p, idx) => `
+      <tr>
+        <td>
+          <div style="font-weight:600;">${idx < 3 ? '🔥 ' : ''}${p.title}</div>
+          <div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase;">${p.brand || ''} · ${p.category || ''}</div>
+        </td>
+        <td style="text-align:center; font-weight:700; font-size:15px;">${p.score}</td>
+        <td style="text-align:center;">${p.demandaEstimadaSemanal} /sem</td>
+        <td style="text-align:center;">${trendBadge(p.tendencia)}</td>
+        <td style="text-align:center;">$${p.margen.toLocaleString()}</td>
+        <td style="text-align:center;">${competBadge(p.competitividad, p.mlPrice)}</td>
+        <td style="text-align:center;">${p.vistasRecientes}</td>
+        <td>${confBadge(p.confianza)}</td>
+      </tr>
+    `).join('');
+
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: #ff3b30; padding: 32px;">Error al calcular el modelo.</td></tr>`;
+  }
+}
+
+async function loadFunnelReport() {
+  const token = localStorage.getItem('paps_token');
+  const tbody = document.getElementById('funnel-table-body');
+  if (!tbody) return;
+
+  const daysSelect = document.getElementById('funnel-days-select');
+  const days = daysSelect ? daysSelect.value : 30;
+
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 32px;">Cargando reporte...</td></tr>`;
+
+  try {
+    const res = await fetch(`/api/admin/funnel?days=${days}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    checkResponseAuth(res);
+    if (!res.ok) throw new Error('Failed');
+    const data = await res.json();
+
+    if (!data.products || data.products.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 32px;">Todavía no hay datos suficientes de navegación en este periodo.</td></tr>`;
+      return;
+    }
+
+    const pctBadge = (val) => {
+      if (val === null || val === undefined) return '<span style="color: var(--text-secondary);">—</span>';
+      let color = '#34c759';
+      if (val < 20) color = '#ff3b30';
+      else if (val < 40) color = '#ff9500';
+      return `<span style="font-weight:600; color:${color};">${val}%</span>`;
+    };
+
+    tbody.innerHTML = data.products.map(p => `
+      <tr>
+        <td>
+          <div style="font-weight:600;">${p.title}</div>
+          ${p.brand ? `<div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase;">${p.brand}</div>` : ''}
+        </td>
+        <td style="text-align:center; font-weight:600;">${p.views}</td>
+        <td style="text-align:center;">
+          ${p.sizeClicks} <br> ${pctBadge(p.stepConversion.viewToSize)}
+        </td>
+        <td style="text-align:center;">
+          ${p.addToCart} <br> ${pctBadge(p.stepConversion.sizeToCart)}
+        </td>
+        <td style="text-align:center;">
+          ${p.purchases} <br> ${pctBadge(p.stepConversion.cartToPurchase)}
+        </td>
+        <td>
+          ${p.biggestDrop ? `<span style="background:#fff3cd; color:#7a5b00; padding:3px 8px; border-radius:6px; font-size:12px; font-weight:600;">${p.biggestDrop}</span>` : '<span style="color: var(--text-secondary);">Sin datos suficientes</span>'}
+        </td>
+      </tr>
+    `).join('');
+
+  } catch (err) {
+    console.error(err);
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: #ff3b30; padding: 32px;">Error al cargar el reporte del embudo.</td></tr>`;
+  }
+}
+
 async function loadReportsData() {
   const token = localStorage.getItem('paps_token');
   const tbody = document.getElementById('reports-table-body');
