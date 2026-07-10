@@ -129,13 +129,13 @@ async function verifyLiveStock(originalUrl, size, productSku = null) {
   }
   if (!sku) {
     console.error("[Live Stock Check] Could not resolve SKU for URL:", originalUrl);
-    return true; // Allow checkout on error to not block sales
+    return { status: 'unverified', reason: 'Could not resolve SKU' };
   }
 
   const token = await getCognitoToken();
   if (!token) {
-    console.warn("[Live Stock Check] Could not retrieve auth token. Defaulting to true.");
-    return true;
+    console.warn("[Live Stock Check] Could not retrieve auth token.");
+    return { status: 'unverified', reason: 'Could not retrieve auth token' };
   }
 
   // Query stock for this specific size
@@ -158,13 +158,21 @@ async function verifyLiveStock(originalUrl, size, productSku = null) {
       if (onlineInfo) {
         const qty = parseInt(onlineInfo.quantity) || 0;
         console.log(`[Live Stock Check] Verified size "${size}" stock in Ecommerce: ${qty}`);
-        return qty > 0;
+        return {
+          status: qty > 0 ? 'in_stock' : 'out_of_stock',
+          quantity: qty
+        };
+      } else {
+        return { status: 'out_of_stock', reason: 'Online inventory not found' };
       }
+    } else {
+      console.warn(`[Live Stock Check] API returned status ${res.status}`);
+      return { status: 'unverified', reason: `API returned status ${res.status}` };
     }
   } catch (err) {
     console.error("[Live Stock Check] Failed to query live API:", err.message);
+    return { status: 'unverified', reason: err.message };
   }
-  return true; // Fallback
 }
 
 /**
