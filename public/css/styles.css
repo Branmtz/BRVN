@@ -377,6 +377,19 @@ header {
   font-weight: 600;
 }
 
+.price-old {
+  color: #ff3b30;
+  font-size: 13px;
+  text-decoration: line-through;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+.price-new {
+  font-size: 18px;
+  font-weight: 600;
+}
+
 .view-btn {
   padding: 8px 16px;
   background-color: var(--accent-color);

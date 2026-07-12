@@ -275,8 +275,8 @@ function buildProductCard(p, imgClass = '') {
   
   const priceHtml = p.wasDiscounted
     ? `<span class="product-price product-price--discounted">
-         <span class="price-old">$${p.originalPrice.toLocaleString()} MXN</span>
          <span class="price-new">$${p.price.toLocaleString()} MXN</span>
+         <span class="price-old">$${p.originalPrice.toLocaleString()} MXN</span>
        </span>`
     : `<span class="product-price">$${p.price.toLocaleString()} MXN</span>`;
 
@@ -291,11 +291,6 @@ function buildProductCard(p, imgClass = '') {
       ${(p.is_bestseller === 1 || p.is_bestseller === true || p.is_bestseller === '1') ? `
       <span class="bestseller-tag">
         <i class="fa-solid fa-fire"></i> MÁS VENDIDOS
-      </span>
-      ` : ''}
-      ${p.wasDiscounted ? `
-      <span class="discount-tag">
-        <i class="fa-solid fa-tag"></i> -$${p.discountAmount.toLocaleString()} MXN
       </span>
       ` : ''}
       <div class="product-image-container ${imgClass}">
