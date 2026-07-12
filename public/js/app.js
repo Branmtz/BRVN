@@ -715,15 +715,15 @@ function renderProductDetail() {
     
     mainImageContainer.innerHTML = `
       <img src="${mainImgUrl}" id="expanded-image" alt="${p.title}">
-      <button class="favorite-btn ${heartActive}" onclick="toggleFavorite(event, '${p.id}')" style="top: 24px; right: 24px;" title="Guardar en favoritos">
+      <button class="favorite-btn ${heartActive}" onclick="toggleFavorite(event, '${p.id}')" style="top: 24px; right: 24px;" title="Guardar en favoritos" aria-label="Guardar en favoritos">
         <i class="${heartIcon} fa-heart"></i>
       </button>
       
       <!-- Navigation Arrows -->
-      <button id="prev-image-btn" onclick="prevProductImage()" style="${arrowStyles} left: 16px;" class="image-nav-arrow" title="Imagen anterior">
+      <button id="prev-image-btn" onclick="prevProductImage()" style="${arrowStyles} left: 16px;" class="image-nav-arrow" title="Imagen anterior" aria-label="Imagen anterior">
         <i class="fa-solid fa-chevron-left"></i>
       </button>
-      <button id="next-image-btn" onclick="nextProductImage()" style="${arrowStyles} right: 16px;" class="image-nav-arrow" title="Siguiente imagen">
+      <button id="next-image-btn" onclick="nextProductImage()" style="${arrowStyles} right: 16px;" class="image-nav-arrow" title="Siguiente imagen" aria-label="Siguiente imagen">
         <i class="fa-solid fa-chevron-right"></i>
       </button>
     `;
