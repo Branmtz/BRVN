@@ -12,7 +12,29 @@
   </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BRVN — Producto</title>
+  <title>{{PAGE_TITLE}}</title>
+  <meta name="description" content="{{PAGE_DESCRIPTION}}">
+  <link rel="canonical" href="{{PAGE_URL}}">
+
+  <!-- Open Graph (Facebook, WhatsApp, TikTok) -->
+  <meta property="og:type" content="product">
+  <meta property="og:title" content="{{PAGE_TITLE}}">
+  <meta property="og:description" content="{{PAGE_DESCRIPTION}}">
+  <meta property="og:image" content="{{PAGE_IMAGE}}">
+  <meta property="og:url" content="{{PAGE_URL}}">
+  <meta property="og:site_name" content="BRVN Calzado">
+  <meta property="product:price:amount" content="{{PAGE_PRICE}}">
+  <meta property="product:price:currency" content="MXN">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{PAGE_TITLE}}">
+  <meta name="twitter:description" content="{{PAGE_DESCRIPTION}}">
+  <meta name="twitter:image" content="{{PAGE_IMAGE}}">
+
+  <!-- Structured data para Google (rich snippets: precio, disponibilidad, marca) -->
+  <script type="application/ld+json">{{PRODUCT_JSONLD}}</script>
+
   <link rel="stylesheet" href="/css/styles.css?v=1.6">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -70,6 +92,7 @@
           <h1 class="detail-title" id="detail-title">Nombre del Calzado</h1>
         </div>
         <div class="detail-price" id="detail-price">$0 MXN</div>
+        <div class="detail-discount-info" id="detail-discount-info" style="display:none;"></div>
         
         <div class="detail-divider"></div>
         
@@ -142,6 +165,6 @@
 
 
 
-  <script src="/js/app.js?v=2.0"></script>
+  <script src="/js/app.js?v=1.9"></script>
 </body>
 </html>

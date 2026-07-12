@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { dbQuery } = require('./database');
@@ -22,6 +23,123 @@ const JWT_SECRET = process.env.JWT_SECRET || 'paps_default_jwt_secret_key_2026';
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+const SITE_URL = process.env.SITE_URL || 'https://brvn.com.mx';
+const DEFAULT_OG_IMAGE = `${SITE_URL}/img/brvn-og-default.jpg`;
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// SSR de metadatos para /product.html: los crawlers de redes sociales
+// (Facebook, WhatsApp, TikTok) y Google NO ejecutan el JavaScript de la SPA,
+// así que el <title>, meta description, Open Graph y JSON-LD deben venir
+// correctos desde el primer HTML que manda el servidor, no agregarse después
+// con JS. Debe registrarse ANTES de express.static para poder interceptar
+// esta ruta (si no, express.static serviría el archivo tal cual).
+app.get('/product.html', async (req, res) => {
+  const templatePath = path.join(__dirname, 'public', 'product.html');
+  let html;
+  try {
+    html = fs.readFileSync(templatePath, 'utf8');
+  } catch (err) {
+    return res.status(500).send('Error interno.');
+  }
+
+  const productId = req.query.id;
+  let pageTitle = 'BRVN — Tenis y Calzado Original en México';
+  let pageDescription = 'Descubre tenis y calzado original de las mejores marcas en BRVN Calzado. Envío gratis en todos tus pedidos.';
+  let pageImage = DEFAULT_OG_IMAGE;
+  let pagePrice = '';
+  let jsonLd = null;
+
+  if (productId) {
+    try {
+      const product = await dbQuery.get("SELECT * FROM products WHERE id = ?", [productId]);
+      if (product) {
+        const price = calculatePrice(product.supplier_price);
+        const images = JSON.parse(product.images || '[]');
+        const firstImage = images[0] || DEFAULT_OG_IMAGE;
+
+        pageTitle = `${product.title} - BRVN Calzado`;
+        pageDescription = product.description
+          ? product.description.slice(0, 155)
+          : `Compra ${product.title} de ${product.brand || 'BRVN'} al mejor precio. Envío gratis en todos tus pedidos.`;
+        pageImage = firstImage;
+        pagePrice = price;
+
+        jsonLd = {
+          '@context': 'https://schema.org/',
+          '@type': 'Product',
+          name: product.title,
+          image: images.length > 0 ? images : [DEFAULT_OG_IMAGE],
+          description: pageDescription,
+          brand: { '@type': 'Brand', name: product.brand || 'BRVN' },
+          offers: {
+            '@type': 'Offer',
+            url: `${SITE_URL}/product.html?id=${product.id}`,
+            priceCurrency: 'MXN',
+            price: price,
+            availability: product.stock > 0 || product.origin === 'priceshoes'
+              ? 'https://schema.org/InStock'
+              : 'https://schema.org/OutOfStock'
+          }
+        };
+      }
+    } catch (err) {
+      console.error('Error generando SEO de producto:', err.message);
+      // sigue con los valores genéricos por defecto
+    }
+  }
+
+  const pageUrl = `${SITE_URL}/product.html${productId ? `?id=${productId}` : ''}`;
+
+  html = html
+    .replace(/{{PAGE_TITLE}}/g, escapeHtml(pageTitle))
+    .replace(/{{PAGE_DESCRIPTION}}/g, escapeHtml(pageDescription))
+    .replace(/{{PAGE_IMAGE}}/g, escapeHtml(pageImage))
+    .replace(/{{PAGE_URL}}/g, escapeHtml(pageUrl))
+    .replace(/{{PAGE_PRICE}}/g, escapeHtml(pagePrice))
+    .replace('{{PRODUCT_JSONLD}}', jsonLd ? JSON.stringify(jsonLd) : '{}');
+
+  res.set('Content-Type', 'text/html');
+  res.send(html);
+});
+
+// Sitemap dinámico: se regenera con el catálogo activo en cada request.
+// Con el volumen de productos que maneja BRVN esto es rápido y siempre
+// está al día, sin necesidad de un job aparte que lo regenere.
+app.get('/sitemap.xml', async (req, res) => {
+  try {
+    const products = await dbQuery.all("SELECT id FROM products WHERE status = 'active'");
+    const staticUrls = ['/', '/favoritos.html', '/carrito.html'];
+
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
+    staticUrls.forEach(url => {
+      xml += `  <url><loc>${SITE_URL}${url}</loc><changefreq>daily</changefreq></url>\n`;
+    });
+    products.forEach(p => {
+      xml += `  <url><loc>${SITE_URL}/product.html?id=${encodeURIComponent(p.id)}</loc><changefreq>weekly</changefreq></url>\n`;
+    });
+    xml += '</urlset>';
+
+    res.set('Content-Type', 'application/xml');
+    res.send(xml);
+  } catch (err) {
+    res.status(500).send('Error generando sitemap.');
+  }
+});
+
+app.get('/robots.txt', (req, res) => {
+  res.set('Content-Type', 'text/plain');
+  res.send(`User-agent: *\nAllow: /\n\nSitemap: ${SITE_URL}/sitemap.xml\n`);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Logistics / Shipping Router
