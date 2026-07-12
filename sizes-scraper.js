@@ -1,17 +1,9 @@
 const { dbQuery } = require('./database');
-let cachedToken = null;
-let tokenFetchTime = 0;
 
 /**
  * Helper to fetch AWS Cognito guest token from Price Shoes revalidate endpoint
- * Caches the token for 30 minutes in memory to prevent slow API response times.
  */
 async function getCognitoToken() {
-  const now = Date.now();
-  if (cachedToken && (now - tokenFetchTime < 1800000)) {
-    return cachedToken;
-  }
-
   const revalidateUrl = "https://www.priceshoes.com/api/auth/revalidate";
   try {
     const res = await fetch(revalidateUrl, {
@@ -19,17 +11,14 @@ async function getCognitoToken() {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://www.priceshoes.com/"
-      },
-      signal: AbortSignal.timeout(4000)
+      }
     });
     if (!res.ok) throw new Error(`HTTP status ${res.status}`);
     const token = await res.json();
-    cachedToken = token;
-    tokenFetchTime = now;
     return token;
   } catch (err) {
     console.error("[Cognito Token] Failed to fetch guest token:", err.message);
-    return cachedToken; // Return stale token on error as fallback
+    return null;
   }
 }
 
@@ -41,8 +30,7 @@ async function getProductSizesFromHTML(originalUrl) {
     const res = await fetch(originalUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      },
-      signal: AbortSignal.timeout(4000)
+      }
     });
     if (!res.ok) throw new Error(`Failed to load page HTML, status: ${res.status}`);
     const html = await res.text();
@@ -86,8 +74,7 @@ async function getLiveStockFromAPI(sku, sizes, token) {
           "Authorization": `Bearer ${token}`,
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Referer": "https://www.priceshoes.com/"
-        },
-        signal: AbortSignal.timeout(4000)
+        }
       });
       if (res.ok) {
         const data = await res.json();
@@ -205,18 +192,16 @@ async function syncSingleProductLive(product) {
       throw new Error("Failed to retrieve guest token from Price Shoes");
     }
 
-    // 2. Try to get sizes from database first to avoid expensive HTML request
-    let sizes = [];
-    try {
-      const parsed = typeof product.sizes === 'string' ? JSON.parse(product.sizes) : (product.sizes || []);
-      sizes = Array.from(new Set(parsed));
-    } catch (e) {
-      sizes = [];
-    }
-
+    // 2. Try to get fresh sizes list from HTML __NEXT_DATA__
+    let sizes = await getProductSizesFromHTML(product.original_url);
     if (!sizes || sizes.length === 0) {
-      console.log(`[On-Demand Sync] No sizes in DB for SKU: ${product.sku}. Fetching HTML as fallback...`);
-      sizes = await getProductSizesFromHTML(product.original_url);
+      // Fallback: use database sizes
+      try {
+        const parsed = typeof product.sizes === 'string' ? JSON.parse(product.sizes) : (product.sizes || []);
+        sizes = Array.from(new Set(parsed));
+      } catch (e) {
+        sizes = [];
+      }
     }
 
     if (!sizes || sizes.length === 0) {
