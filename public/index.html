@@ -220,7 +220,7 @@
       <div class="nav-icons">
         <!-- Search dropdown icon -->
         <div class="nav-search-wrapper" id="nav-search-wrapper">
-          <a href="javascript:void(0)" onclick="toggleNavSearch()" title="Buscar" id="nav-search-toggle" class="nav-search-toggle-btn">
+          <a href="javascript:void(0)" onclick="toggleNavSearch()" title="Buscar" aria-label="Buscar productos" id="nav-search-toggle" class="nav-search-toggle-btn">
             <i class="fa-solid fa-magnifying-glass" id="nav-search-icon"></i>
           </a>
           <!-- Compact dropdown search -->
@@ -234,16 +234,16 @@
                 onkeyup="handleNavSearch(event)"
                 autocomplete="off"
               >
-              <button onclick="closeNavSearch()" class="nav-search-close-btn" title="Cerrar">
+              <button onclick="closeNavSearch()" class="nav-search-close-btn" title="Cerrar" aria-label="Cerrar búsqueda">
                 <i class="fa-solid fa-xmark"></i>
               </button>
             </div>
           </div>
         </div>
-        <a href="javascript:void(0)" onclick="switchTab('trends')" title="Los Más Vendidos" class="nav-desktop-only"><i class="fa-solid fa-fire" style="color: #ff9500;"></i></a>
-        <a href="/rastreador.html" title="Rastrear Pedido" class="nav-desktop-only"><i class="fa-solid fa-location-dot"></i></a>
-        <a href="javascript:void(0)" onclick="switchTab('menu')" title="Mi Cuenta" class="nav-desktop-only"><i class="fa-regular fa-user"></i></a>
-        <a href="/carrito.html" class="cart-icon nav-desktop-only" title="Carrito">
+        <a href="javascript:void(0)" onclick="switchTab('trends')" title="Los Más Vendidos" aria-label="Los Más Vendidos" class="nav-desktop-only"><i class="fa-solid fa-fire" style="color: #ff9500;"></i></a>
+        <a href="/rastreador.html" title="Rastrear Pedido" aria-label="Rastrear Pedido" class="nav-desktop-only"><i class="fa-solid fa-location-dot"></i></a>
+        <a href="javascript:void(0)" onclick="switchTab('menu')" title="Mi Cuenta" aria-label="Mi Cuenta" class="nav-desktop-only"><i class="fa-regular fa-user"></i></a>
+        <a href="/carrito.html" class="cart-icon nav-desktop-only" title="Carrito" aria-label="Carrito de compras">
           <i class="fa-solid fa-bag-shopping"></i>
           <span id="cart-count">0</span>
         </a>

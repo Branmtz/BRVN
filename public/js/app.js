@@ -279,10 +279,9 @@ function buildProductCard(p, imgClass = '') {
          <span class="price-old">$${p.originalPrice.toLocaleString()} MXN</span>
        </span>`
     : `<span class="product-price">$${p.price.toLocaleString()} MXN</span>`;
-
   return `
     <article class="product-card" onclick="viewProduct(event, '${p.id}')">
-      <button class="favorite-btn ${heartActive}" onclick="toggleFavorite(event, '${p.id}')" title="Guardar en favoritos">
+      <button class="favorite-btn ${heartActive}" onclick="toggleFavorite(event, '${p.id}')" title="Guardar en favoritos" aria-label="Guardar en favoritos">
         <i class="${heartIcon} fa-heart"></i>
       </button>
       <span class="origin-tag ${p.origin}">
@@ -301,7 +300,7 @@ function buildProductCard(p, imgClass = '') {
         <h3 class="product-title">${p.title}</h3>
         <div class="product-meta">
           ${priceHtml}
-          <a href="javascript:void(0)" onclick="viewProduct(event, '${p.id}')" class="view-btn">Ver</a>
+          <a href="javascript:void(0)" onclick="viewProduct(event, '${p.id}')" class="view-btn" aria-label="Ver detalles de ${p.title.replace(/"/g, '&quot;')}">Ver</a>
         </div>
       </div>
     </article>
