@@ -68,7 +68,7 @@
           
           if (res.ok) {
             // Redirect to success
-            window.location.href = `/checkout-result.html?status=success&folio=${folio}`;
+            window.location.href = `/resultado-compra.html?status=success&folio=${folio}`;
           } else {
             alert('Error al simular la aprobación.');
             btn.disabled = false;
@@ -83,7 +83,7 @@
       });
       
       document.getElementById('fail-btn').addEventListener('click', () => {
-        window.location.href = `/checkout-result.html?status=failure&folio=${folio}`;
+        window.location.href = `/resultado-compra.html?status=failure&folio=${folio}`;
       });
     });
   </script>

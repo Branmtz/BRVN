@@ -79,9 +79,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const path = window.location.pathname;
   if (path === '/' || path.includes('index.html') || path === '') {
     initCatalogPage();
-  } else if (path.includes('product.html')) {
+  } else if (path.includes('producto.html')) {
     initProductDetailPage();
-  } else if (path.includes('cart.html')) {
+  } else if (path.includes('carrito.html')) {
     initCartPage();
   }
 });
@@ -259,7 +259,7 @@ window.viewProduct = function(event, id) {
   if (cachedProduct) {
     sessionStorage.setItem('preloaded_product', JSON.stringify(cachedProduct));
   }
-  window.location.href = `/product.html?id=${id}`;
+  window.location.href = `/producto.html?id=${id}`;
 };
 
 function buildProductCard(p, imgClass = '') {

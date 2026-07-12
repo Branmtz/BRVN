@@ -30,8 +30,8 @@
       </nav>
       <div class="nav-icons">
         <a href="javascript:void(0)" onclick="switchTab('trends')" title="Los Más Vendidos" class="nav-desktop-only"><i class="fa-solid fa-fire" style="color: #ff9500;"></i></a>
-        <a href="/track.html" title="Rastrear Pedido" class="nav-desktop-only"><i class="fa-solid fa-location-dot"></i></a>
-        <a href="/cart.html" class="cart-icon" title="Carrito">
+        <a href="/rastreador.html" title="Rastrear Pedido" class="nav-desktop-only"><i class="fa-solid fa-location-dot"></i></a>
+        <a href="/carrito.html" class="cart-icon" title="Carrito">
           <i class="fa-solid fa-bag-shopping"></i>
           <span id="cart-count">0</span>
         </a>
@@ -92,7 +92,7 @@
         titleEl.textContent = '¡Gracias por tu compra!';
         msgEl.innerHTML = `Tu pago ha sido aprobado correctamente por Mercado Pago.<br><br>Conserva tu folio de compra para el rastreo de tu envío:<br><strong style="font-size: 18px; color:#1d1d1f; display:block; margin-top:8px;">${folio}</strong>`;
         actionEl.innerHTML = `
-          <a href="/track.html?folio=${folio}" class="buy-button" style="display: block; margin-bottom: 12px;">Rastrear mi pedido</a>
+          <a href="/rastreador.html?folio=${folio}" class="buy-button" style="display: block; margin-bottom: 12px;">Rastrear mi pedido</a>
           <a href="/" class="secondary-btn" style="display: block; text-align: center; padding: 12px;">Volver a la tienda</a>
         `;
 
@@ -117,7 +117,7 @@
         titleEl.textContent = 'Pago Pendiente';
         msgEl.innerHTML = `El pago del pedido está en proceso de acreditación (si es OXXO, recuerda pagar en sucursal).<br><br>Conserva tu folio de compra:<br><strong style="font-size: 18px; color:#1d1d1f; display:block; margin-top:8px;">${folio}</strong>`;
         actionEl.innerHTML = `
-          <a href="/track.html?folio=${folio}" class="buy-button" style="display: block; margin-bottom: 12px;">Ver detalles del pedido</a>
+          <a href="/rastreador.html?folio=${folio}" class="buy-button" style="display: block; margin-bottom: 12px;">Ver detalles del pedido</a>
           <a href="/" class="secondary-btn" style="display: block; text-align: center; padding: 12px;">Volver a la tienda</a>
         `;
       } else {

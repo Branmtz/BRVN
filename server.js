@@ -36,14 +36,14 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-// SSR de metadatos para /product.html: los crawlers de redes sociales
+// SSR de metadatos para /producto.html: los crawlers de redes sociales
 // (Facebook, WhatsApp, TikTok) y Google NO ejecutan el JavaScript de la SPA,
 // así que el <title>, meta description, Open Graph y JSON-LD deben venir
 // correctos desde el primer HTML que manda el servidor, no agregarse después
 // con JS. Debe registrarse ANTES de express.static para poder interceptar
 // esta ruta (si no, express.static serviría el archivo tal cual).
-app.get('/product.html', async (req, res) => {
-  const templatePath = path.join(__dirname, 'public', 'product.html');
+app.get('/producto.html', async (req, res) => {
+  const templatePath = path.join(__dirname, 'public', 'producto.html');
   let html;
   try {
     html = fs.readFileSync(templatePath, 'utf8');
@@ -82,7 +82,7 @@ app.get('/product.html', async (req, res) => {
           brand: { '@type': 'Brand', name: product.brand || 'BRVN' },
           offers: {
             '@type': 'Offer',
-            url: `${SITE_URL}/product.html?id=${product.id}`,
+            url: `${SITE_URL}/producto.html?id=${product.id}`,
             priceCurrency: 'MXN',
             price: price,
             availability: product.stock > 0 || product.origin === 'priceshoes'
@@ -97,7 +97,7 @@ app.get('/product.html', async (req, res) => {
     }
   }
 
-  const pageUrl = `${SITE_URL}/product.html${productId ? `?id=${productId}` : ''}`;
+  const pageUrl = `${SITE_URL}/producto.html${productId ? `?id=${productId}` : ''}`;
 
   html = html
     .replace(/{{PAGE_TITLE}}/g, escapeHtml(pageTitle))
@@ -124,7 +124,7 @@ app.get('/sitemap.xml', async (req, res) => {
       xml += `  <url><loc>${SITE_URL}${url}</loc><changefreq>daily</changefreq></url>\n`;
     });
     products.forEach(p => {
-      xml += `  <url><loc>${SITE_URL}/product.html?id=${encodeURIComponent(p.id)}</loc><changefreq>weekly</changefreq></url>\n`;
+      xml += `  <url><loc>${SITE_URL}/producto.html?id=${encodeURIComponent(p.id)}</loc><changefreq>weekly</changefreq></url>\n`;
     });
     xml += '</urlset>';
 
@@ -1144,7 +1144,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       console.log(`[Zero Price Checkout] Generated link for folio: ${orderFolio}`);
       return res.json({
         folio: orderFolio,
-        checkoutUrl: `/simulated-payment.html?folio=${orderFolio}&total=0`
+        checkoutUrl: `/pago-simulado.html?folio=${orderFolio}&total=0`
       });
     }
 
@@ -1159,7 +1159,7 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
       console.log(`[Mercado Pago Preference Mocked] Generated link for folio: ${orderFolio}`);
       return res.json({
         folio: orderFolio,
-        checkoutUrl: `/simulated-payment.html?folio=${orderFolio}&total=${calculatedTotal}`
+        checkoutUrl: `/pago-simulado.html?folio=${orderFolio}&total=${calculatedTotal}`
       });
     }
     
@@ -1194,9 +1194,9 @@ app.post('/api/checkout', rateLimiter(10, 60000), async (req, res) => {
         }
       },
       back_urls: {
-        success: `${baseUrl}/checkout-result.html?status=success&folio=${orderFolio}`,
-        failure: `${baseUrl}/checkout-result.html?status=failure&folio=${orderFolio}`,
-        pending: `${baseUrl}/checkout-result.html?status=pending&folio=${orderFolio}`
+        success: `${baseUrl}/resultado-compra.html?status=success&folio=${orderFolio}`,
+        failure: `${baseUrl}/resultado-compra.html?status=failure&folio=${orderFolio}`,
+        pending: `${baseUrl}/resultado-compra.html?status=pending&folio=${orderFolio}`
       },
       auto_return: 'approved',
       external_reference: orderFolio,
@@ -1767,7 +1767,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
             <h2 style="text-align: center; color: #111; letter-spacing: 0.2em; font-weight: bold;">B R V N</h2>
             <p style="color: #666; font-size: 16px; line-height: 1.5;">Recibimos una solicitud para restablecer tu contraseña. Haz clic en el siguiente enlace para crear una nueva contraseña:</p>
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${baseUrl}/reset-password.html?token=${resetToken}" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; display: inline-block;">Restablecer Contraseña</a>
+              <a href="${baseUrl}/restablecer-contrasena.html?token=${resetToken}" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 4px; font-weight: bold; font-size: 14px; display: inline-block;">Restablecer Contraseña</a>
             </div>
             <p style="color: #999; font-size: 12px; text-align: center; margin-top: 15px;">Este enlace es válido por 15 minutos.</p>
           </div>
@@ -1778,7 +1778,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       if (!info.isFallback) {
         console.log(`[Email] Password reset sent to ${email}: ${info.messageId}`);
       } else {
-        console.warn(`[Email Warning] Transporter not ready. Reset link for ${email} is: ${baseUrl}/reset-password.html?token=${resetToken}`);
+        console.warn(`[Email Warning] Transporter not ready. Reset link for ${email} is: ${baseUrl}/restablecer-contrasena.html?token=${resetToken}`);
       }
     }
   } catch (err) {
