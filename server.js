@@ -36,6 +36,27 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
+// Redirecciones 301 de URLs antiguas en inglés a español para mantener SEO e impedir 404s
+const oldUrlsMap = {
+  '/product.html': '/producto.html',
+  '/cart.html': '/carrito.html',
+  '/track.html': '/rastreador.html',
+  '/register.html': '/registro.html',
+  '/forgot-password.html': '/recuperar-contrasena.html',
+  '/reset-password.html': '/restablecer-contrasena.html',
+  '/verify-email.html': '/verificar-correo.html',
+  '/checkout-result.html': '/resultado-compra.html',
+  '/simulated-payment.html': '/pago-simulado.html',
+  '/admin.html': '/administrador.html'
+};
+
+Object.entries(oldUrlsMap).forEach(([oldUrl, newUrl]) => {
+  app.get(oldUrl, (req, res) => {
+    const query = Object.keys(req.query).length > 0 ? '?' + new URLSearchParams(req.query).toString() : '';
+    res.redirect(301, `${newUrl}${query}`);
+  });
+});
+
 // SSR de metadatos para /producto.html: los crawlers de redes sociales
 // (Facebook, WhatsApp, TikTok) y Google NO ejecutan el JavaScript de la SPA,
 // así que el <title>, meta description, Open Graph y JSON-LD deben venir
