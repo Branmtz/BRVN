@@ -2181,7 +2181,7 @@ footer {
 
 /* Slide 2: Mexico theme with white background and Mexican colors */
 .carousel-slide.mexico-slide {
-  background-image: url('/mexico_white_banner_bg.png');
+  background-image: url('/mexico_white_banner_bg.webp');
   background-size: cover;
   background-position: center;
 }
