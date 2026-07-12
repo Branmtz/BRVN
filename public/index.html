@@ -55,6 +55,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&family=Outfit:wght@300;400;500;600;700&family=Prata&display=swap" rel="stylesheet">
 
+  <!-- Preconectar a CDNJS y pre-cargar la imagen LCP del hero banner -->
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="preload" href="/hero_banner_shoes.png" as="image" fetchpriority="high">
+
   <link rel="stylesheet" href="/css/styles.css?v=1.7">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script>
@@ -266,7 +270,7 @@
             <a href="#categories-section-anchor" class="hero-banner-button" onclick="scrollToCategories(event)">Ver colección</a>
           </div>
           <div class="hero-banner-image-container">
-            <img src="/hero_banner_shoes.png" alt="El par que buscabas, llegó.">
+            <img src="/hero_banner_shoes.png" alt="El par que buscabas, llegó." fetchpriority="high">
           </div>
         </section>
 
@@ -277,29 +281,29 @@
         <section class="category-cards-section">
           <div class="category-cards-grid">
             <!-- Card 1: Mujer -->
-            <div class="category-card-item" onclick="selectCategory('Mujeres')">
-              <img src="/category_mujer.png" alt="Mujer">
+             <div class="category-card-item" onclick="selectCategory('Mujeres')">
+              <img src="/category_mujer.png" alt="Mujer" loading="lazy">
               <div class="category-card-overlay"></div>
               <div class="category-card-text">Mujer</div>
             </div>
 
             <!-- Card 2: Hombre -->
-            <div class="category-card-item" onclick="selectCategory('Hombres')">
-              <img src="/category_hombre.png" alt="Hombre">
+             <div class="category-card-item" onclick="selectCategory('Hombres')">
+              <img src="/category_hombre.png" alt="Hombre" loading="lazy">
               <div class="category-card-overlay"></div>
               <div class="category-card-text">Hombre</div>
             </div>
 
             <!-- Card 3: Niños -->
-            <div class="category-card-item" onclick="selectCategory('Niños')">
-              <img src="/category_ninos.png" alt="Niños">
+             <div class="category-card-item" onclick="selectCategory('Niños')">
+              <img src="/category_ninos.png" alt="Niños" loading="lazy">
               <div class="category-card-overlay"></div>
               <div class="category-card-text">Niños</div>
             </div>
 
             <!-- Card 4: Más vendidos -->
-            <div class="category-card-item" onclick="selectCategory('Lo más vendido')">
-              <img src="/category_trends.png" alt="Más vendidos">
+             <div class="category-card-item" onclick="selectCategory('Lo más vendido')">
+              <img src="/category_trends.png" alt="Más vendidos" loading="lazy">
               <div class="category-card-overlay"></div>
               <div class="category-card-text">Más vendidos</div>
             </div>
