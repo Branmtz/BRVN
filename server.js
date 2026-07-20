@@ -167,7 +167,7 @@ app.get('/robots.txt', (req, res) => {
 app.get('/feed-merchant.xml', async (req, res) => {
   try {
     const products = await dbQuery.all(`
-      SELECT id, sku, title, description, price, images, brand, color, gender, stock 
+      SELECT id, sku, title, description, price, supplier_price, images, brand, color, gender, stock 
       FROM products 
       WHERE status = 'active'
     `);
@@ -207,7 +207,9 @@ app.get('/feed-merchant.xml', async (req, res) => {
       if (!imageLink) imageLink = `${SITE_URL}/placeholder.jpg`;
 
       const availability = (p.stock > 0) ? 'in_stock' : 'out_of_stock';
-      const formattedPrice = `${(p.price || 0).toFixed(2)} MXN`;
+      const pricing = getPricingInfo(p.supplier_price);
+      const basePriceFormatted = `${(pricing.originalPrice || pricing.price).toFixed(2)} MXN`;
+      const salePriceFormatted = pricing.wasDiscounted ? `${pricing.price.toFixed(2)} MXN` : '';
       const brand = p.brand || 'BRVN';
       
       let googleGender = 'unisex';
@@ -224,7 +226,10 @@ app.get('/feed-merchant.xml', async (req, res) => {
       xml += `      <g:link>${cleanXml(SITE_URL)}/producto.html?id=${encodeURIComponent(p.id)}</g:link>\n`;
       xml += `      <g:image_link>${cleanXml(imageLink)}</g:image_link>\n`;
       xml += `      <g:availability>${availability}</g:availability>\n`;
-      xml += `      <g:price>${cleanXml(formattedPrice)}</g:price>\n`;
+      xml += `      <g:price>${cleanXml(basePriceFormatted)}</g:price>\n`;
+      if (salePriceFormatted) {
+        xml += `      <g:sale_price>${cleanXml(salePriceFormatted)}</g:sale_price>\n`;
+      }
       xml += `      <g:brand>${wrapCData(brand)}</g:brand>\n`;
       xml += `      <g:condition>new</g:condition>\n`;
       xml += `      <g:gender>${googleGender}</g:gender>\n`;
