@@ -163,6 +163,90 @@ app.get('/robots.txt', (req, res) => {
   res.send(`User-agent: *\nAllow: /\n\nSitemap: ${SITE_URL}/sitemap.xml\n`);
 });
 
+// Google Merchant Center feed xml dinámico
+app.get('/feed-merchant.xml', async (req, res) => {
+  try {
+    const products = await dbQuery.all(`
+      SELECT id, sku, title, description, price, images, brand, color, gender, stock 
+      FROM products 
+      WHERE status = 'active'
+    `);
+
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    xml += '<rss xmlns:g="http://base.google.com/ns/1.0" version="2.0">\n';
+    xml += '  <channel>\n';
+    xml += '    <title>BRVN Calzado</title>\n';
+    xml += `    <link>${SITE_URL}</link>\n`;
+    xml += '    <description>Tienda de tenis en línea y calzado deportivo original en México</description>\n';
+
+    const cleanXml = (val) => {
+      if (val === null || val === undefined) return '';
+      return String(val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+    };
+
+    const wrapCData = (val) => {
+      if (!val) return '';
+      return `<![CDATA[${String(val).replace(/]]>/g, ']}')}]]>`;
+    };
+
+    products.forEach(p => {
+      let imageLink = '';
+      if (p.images) {
+        try {
+          const imgs = JSON.parse(p.images);
+          if (Array.isArray(imgs) && imgs.length > 0) {
+            imageLink = imgs[0];
+          }
+        } catch (e) {}
+      }
+      if (!imageLink) imageLink = `${SITE_URL}/placeholder.jpg`;
+
+      const availability = (p.stock > 0) ? 'in_stock' : 'out_of_stock';
+      const formattedPrice = `${(p.price || 0).toFixed(2)} MXN`;
+      const brand = p.brand || 'BRVN';
+      
+      let googleGender = 'unisex';
+      if (p.gender === 'Caballero') googleGender = 'male';
+      else if (p.gender === 'Dama') googleGender = 'female';
+
+      let ageGroup = 'adult';
+      if (p.gender === 'Niños') ageGroup = 'kids';
+
+      xml += '    <item>\n';
+      xml += `      <g:id>${cleanXml(p.id)}</g:id>\n`;
+      xml += `      <g:title>${wrapCData(p.title)}</g:title>\n`;
+      xml += `      <g:description>${wrapCData(p.description || `Compra ${p.title} original en BRVN Calzado. Los mejores precios y envío gratis.`)}</g:description>\n`;
+      xml += `      <g:link>${cleanXml(SITE_URL)}/producto.html?id=${encodeURIComponent(p.id)}</g:link>\n`;
+      xml += `      <g:image_link>${cleanXml(imageLink)}</g:image_link>\n`;
+      xml += `      <g:availability>${availability}</g:availability>\n`;
+      xml += `      <g:price>${cleanXml(formattedPrice)}</g:price>\n`;
+      xml += `      <g:brand>${wrapCData(brand)}</g:brand>\n`;
+      xml += `      <g:condition>new</g:condition>\n`;
+      xml += `      <g:gender>${googleGender}</g:gender>\n`;
+      xml += `      <g:age_group>${ageGroup}</g:age_group>\n`;
+      xml += `      <g:color>${wrapCData(p.color || 'Varios')}</g:color>\n`;
+      if (p.sku) {
+        xml += `      <g:mpn>${cleanXml(p.sku)}</g:mpn>\n`;
+      }
+      xml += '    </item>\n';
+    });
+
+    xml += '  </channel>\n';
+    xml += '</rss>';
+
+    res.set('Content-Type', 'application/xml');
+    res.send(xml);
+  } catch (err) {
+    console.error('Error generating Google Merchant Feed:', err);
+    res.status(500).send('Error generando feed.');
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Logistics / Shipping Router
