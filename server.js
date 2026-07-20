@@ -169,7 +169,7 @@ app.get('/feed-merchant.xml', async (req, res) => {
     const products = await dbQuery.all(`
       SELECT id, sku, title, description, price, supplier_price, images, brand, color, gender, stock 
       FROM products 
-      WHERE status = 'active'
+      WHERE status = 'active' AND is_tenis = 1
     `);
 
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
@@ -206,7 +206,7 @@ app.get('/feed-merchant.xml', async (req, res) => {
       }
       if (!imageLink) imageLink = `${SITE_URL}/placeholder.jpg`;
 
-      const availability = (p.stock > 0) ? 'in_stock' : 'out_of_stock';
+      const availability = 'in_stock';
       const pricing = getPricingInfo(p.supplier_price);
       const basePriceFormatted = `${(pricing.originalPrice || pricing.price).toFixed(2)} MXN`;
       const salePriceFormatted = pricing.wasDiscounted ? `${pricing.price.toFixed(2)} MXN` : '';
