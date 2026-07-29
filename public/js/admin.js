@@ -53,11 +53,20 @@ async function initAnnouncementBanner() {
   }, 4000);
 }
 
+let isAuthAlertShowing = false;
+
 function checkResponseAuth(res) {
   if (res.status === 401 || res.status === 403) {
+    const hadToken = !!localStorage.getItem('paps_token');
     localStorage.removeItem('paps_token');
-    alert('Tu sesión ha expirado o es inválida. Por favor, inicia sesión de nuevo.');
     checkAuth();
+    if (hadToken && !isAuthAlertShowing) {
+      isAuthAlertShowing = true;
+      alert('Tu sesión ha expirado o es inválida. Por favor, inicia sesión de nuevo.');
+      setTimeout(() => {
+        isAuthAlertShowing = false;
+      }, 3000);
+    }
     throw new Error('Sesión expirada');
   }
   return res;
@@ -107,6 +116,7 @@ async function handleLoginSubmit(e) {
     const data = await res.json();
     if (res.ok && data.token) {
       localStorage.setItem('paps_token', data.token);
+      isAuthAlertShowing = false;
       checkAuth();
     } else {
       alert(data.error || 'Credenciales inválidas.');
